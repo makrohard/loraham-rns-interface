@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loraham-rns-interface"
+version = "0.1.0"
+description = "Direct-SPI LoRa interface for Reticulum on LoRaHAM Pi hardware"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["rns>=1.4.0", "spidev", "gpiod>=2.1"]
+
+[project.scripts]
+loraham-rns-node = "loraham_rns.node:main"
+loraham-rns-client = "loraham_rns.client:main"
+
+[tool.setuptools]
+packages = ["loraham_rns"]
