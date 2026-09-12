@@ -1,3 +1,7 @@
+# 0.2.1
+- RF log: one lock around rollover and write — the RX and TX threads could race two
+  rollovers and lose the previous segment.
+
 # 0.2.0
 - RF log: `rf_log = yes|no` + `rf_log_path` in the interface section append
   one line per packet the radio received (RSSI/SNR, before RNS sees it) or

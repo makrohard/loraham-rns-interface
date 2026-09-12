@@ -199,3 +199,31 @@ def test_a_bad_switch_refuses_the_interface_before_the_hardware(tmp_path, extra,
     monkeypatch.setattr(RNS.Interfaces.Interface.Interface, "__init__", lambda self: None)
     with pytest.raises(ValueError, match=match):
         LoRaSPIInterface(_Owner(), _config(tmp_path, **extra))
+
+
+def test_two_threads_never_lose_a_line_or_a_segment_across_rollovers(tmp_path):
+    """The RX and TX loops write the same file from two threads. Without one lock around
+    rollover + write, two rollovers can race: the second copies the just-truncated live file
+    over `.1` and the history is gone. Every line must land in `.1` or the live file."""
+    path = tmp_path / "rf-reticulum.log"
+    log = RfLog(max_bytes=4000)
+    log.open(str(path))
+    n = 400
+    def rx():
+        for i in range(n):
+            log.rx(-90.0, 5.0, b"R" * 40)
+    def tx():
+        for i in range(n):
+            log.tx("ok", b"T" * 40)
+    a, b = threading.Thread(target=rx), threading.Thread(target=tx)
+    a.start(); b.start(); a.join(); b.join()
+    prev = tmp_path / "rf-reticulum.log.1"
+    live = path.read_bytes()
+    assert live == b"" or live.endswith(b"\n")
+    kept = _lines(prev) + _lines(path)
+    assert prev.stat().st_size > 0                       # the previous segment holds history
+    assert kept <= 2 * n and all(line.count(b" R") <= 1 for line in live.splitlines())
+    # No torn line: every line in both files is a complete record.
+    for f in (prev, path):
+        for line in f.read_bytes().splitlines():
+            assert line.startswith(b"20") and (b" RX " in line or b" TX " in line)

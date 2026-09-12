@@ -19,6 +19,7 @@ changes, so an external truncate (the controller's Clear) is tolerated
 
 import errno
 import os
+import threading
 import time
 
 MAX_BYTES = 5 * 1024 * 1024
@@ -67,6 +68,10 @@ class RfLog:
         self._fd = None
         self._path = None
         self.max_bytes = max_bytes
+        # The RX and TX loops are two threads writing one file: the rollover (copy, then
+        # truncate) and the line write must never interleave, or two rollovers race and one
+        # copies an already-truncated file over the previous segment.
+        self._lock = threading.Lock()
 
     @property
     def active(self):
@@ -85,10 +90,15 @@ class RfLog:
         # O_RDWR, not O_WRONLY: the rollover reads this same descriptor to copy
         # the tail out. O_APPEND still lands every write at the current end.
         fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC, 0o644)
-        self.close()
-        self._fd, self._path = fd, path
+        with self._lock:
+            self._close_locked()
+            self._fd, self._path = fd, path
 
     def close(self):
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self):
         if self._fd is not None:
             try:
                 os.close(self._fd)
@@ -97,12 +107,14 @@ class RfLog:
         self._fd = self._path = None
 
     def rx(self, rssi, snr, data):
-        if self._fd is not None:
-            self._write(format_rx(_utc_now(), rssi, snr, data))
+        with self._lock:
+            if self._fd is not None:
+                self._write(format_rx(_utc_now(), rssi, snr, data))
 
     def tx(self, outcome, data):
-        if self._fd is not None:
-            self._write(format_tx(_utc_now(), outcome, data))
+        with self._lock:
+            if self._fd is not None:
+                self._write(format_tx(_utc_now(), outcome, data))
 
     # -- retention: copy-truncate, same inode -------------------------------
 
