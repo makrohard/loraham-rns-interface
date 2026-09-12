@@ -14,6 +14,7 @@ import RNS
 from .duty import DutyAccount, DutyError
 from .profiles import resolve
 from .radio import MAX_PAYLOAD, RadioError
+from .rflog import RfLog, parse_switch
 from .spibus import SpiBus, SpiBusError
 from .sx126x import SX1262
 from .sx127x import SX127x
@@ -164,6 +165,15 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
         self._run = True
         self.fatal = None                   # set when the runner must exit
 
+        # The RF log is opened before the radio: `rf_log = yes` without a path
+        # is a configuration error, not a silent "no". The path is the
+        # controller's and must be absolute.
+        self.rflog = RfLog()
+        if parse_switch(c.get("rf_log", "no")):
+            if not str(c.get("rf_log_path", "") or "").strip():
+                raise ValueError("rf_log = yes needs rf_log_path")
+            self.rflog.open(str(c["rf_log_path"]).strip())
+
         self.bus = SpiBus(c.get("spidev", "/dev/spidev0.0"), self.profile.cs,
                           c.get("gpio_chip", "/dev/gpiochip0"),
                           c.get("runtime_dir"), int(c.get("spi_speed", 2000000)))
@@ -231,6 +241,7 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
             self.bus.close()
         except Exception:
             pass
+        self.rflog.close()
 
     def __str__(self):
         return f"LoRaSPIInterface[{self.name}]"
@@ -270,6 +281,8 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
                     self.last_rssi, self.last_snr = rssi, snr
                     RNS.log(f"{self} RX {len(data)} B  RSSI {rssi:.0f} dBm  "
                             f"SNR {snr:.2f} dB", RNS.LOG_DEBUG)
+                    # What the radio received — before RNS decides what it is.
+                    self.rflog.rx(rssi, snr, data)
                     self.process_incoming(data)
             except (SpiBusError, RadioError) as exc:
                 self._fail(exc)
@@ -312,10 +325,14 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
         with self._radio_lock:
             self._tx_active.set()
         try:
-            if not self.radio.transmit(data, max(5.0, toa * 4)):
-                # Counted as transmitted: we cannot prove nothing was radiated.
+            if self.radio.transmit(data, max(5.0, toa * 4)):
+                self.rflog.tx("ok", data)
+            else:
+                # Counted as transmitted: we cannot prove nothing was radiated,
+                # so the log says so too rather than staying silent.
                 RNS.log(f"{self} TX did not confirm within the window "
                         f"(airtime still charged)", RNS.LOG_ERROR)
+                self.rflog.tx("unconfirmed", data)
             self.txb += len(data)
             with self._radio_lock:
                 self.radio.start_rx()

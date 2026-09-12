@@ -70,6 +70,34 @@ loop cannot wipe the hour's accounting. Corrupt state blocks TX but never RX; an
 unconfirmed transmission stays charged, because we cannot prove nothing was
 radiated.
 
+## RF log
+
+Two keys in the interface section, both written by the controller:
+
+```
+  [[LoRa]]
+    rf_log = yes
+    rf_log_path = /absolute/path/rf-reticulum.log
+```
+
+One line per packet the radio received or sent, at the radio boundary — before
+RNS decides what an incoming packet is, and with the radio's own confirmation as
+the outcome of an outgoing one:
+
+```text
+<utc> RX rssi=<dBm> snr=<dB> len=<n> hex=<..> ascii="<..>"
+<utc> TX rssi=- snr=- len=<n> outcome=<ok|unconfirmed> hex=<..> ascii="<..>"
+```
+
+The payload is the raw LoRa payload: Reticulum ciphertext, IFAC included, and
+MeshChat traffic looks like every other packet. `unconfirmed` means the radio
+did not report TX done within the window; the airtime was charged and the
+packet may have gone out, so it is never logged as not radiated. A packet
+dropped for duty or size writes nothing. The file is copy-truncated at 5 MB
+into `<path>.1` on the same inode, so truncating it externally is safe. `rf_log
+= yes` without a path, or a relative path, refuses the interface — the runner
+exits rather than running unlogged. Default `no`.
+
 ## Licence
 
 MIT for this repository. RNS is under the Reticulum License and is imported, not
