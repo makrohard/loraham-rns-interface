@@ -1,3 +1,9 @@
+# Unreleased
+- Duty ledger: a caller that found the lock file but no ledger could win the flock
+  in the creator's gap between creating the lock and locking it, and refused with
+  "has disappeared". It now waits (bounded by the lock timeout) for the creator's
+  initialisation write before locking; a ledger that never appears still refuses.
+
 # 0.2.1
 - RF log: one lock around rollover and write — the RX and TX threads could race two
   rollovers and lose the previous segment.

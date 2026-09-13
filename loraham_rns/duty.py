@@ -67,26 +67,40 @@ class DutyAccount:
             try:
                 fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 first_use = True
-            except FileExistsError:        # lost the race — the winner initialised
+            except FileExistsError:        # lost the race — the winner initialises
                 fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
+        if not first_use and create and not os.path.exists(self.path):
+            # The creator makes the lock file first and takes the flock second; in
+            # that gap a second caller can win the flock, find no ledger and refuse
+            # ("has disappeared"). Wait for the creator's initialisation write before
+            # locking. Bounded: a ledger that never appears is the wiped-ledger case
+            # and keeps its refusal — only after the same timeout as the lock itself.
+            deadline = time.monotonic() + LOCK_TIMEOUT_S
+            while not os.path.exists(self.path) and time.monotonic() < deadline:
+                time.sleep(0.02)
+        try:
+            self._flock(fd)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd, first_use
+
+    def _flock(self, fd):
         deadline = time.monotonic() + LOCK_TIMEOUT_S
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
+                return
             except OSError as exc:
                 if exc.errno not in (errno.EAGAIN, errno.EACCES):
-                    os.close(fd)
                     raise
                 if time.monotonic() >= deadline:
-                    os.close(fd)
                     # Unbounded waiting here stalls the TX worker indefinitely; a peer
                     # holding this lock for seconds is a fault, not congestion.
                     raise DutyError(
                         f"airtime lock {self.path}.lock busy for more than "
                         f"{LOCK_TIMEOUT_S:.0f}s — refusing to transmit")
                 time.sleep(0.02)
-        return fd, first_use
 
     def _read(self, fd, first_use=False):
         """Read the ledger. `fd` is the LOCK file — the ledger is opened by path,
