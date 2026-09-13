@@ -28,7 +28,7 @@ _TRUE = ("yes", "on", "true", "1")
 _FALSE = ("no", "off", "false", "0")
 
 
-def parse_switch(value):
+def parse_switch(value, name="rf_log"):
     """``yes``/``on``/``true``/``1`` → True, ``no``/``off``/``false``/``0`` → False.
     Anything else raises: a switch that is neither on nor off must not
     default silently."""
@@ -37,7 +37,7 @@ def parse_switch(value):
         return True
     if text in _FALSE:
         return False
-    raise ValueError(f"rf_log must be yes or no, not {value!r}")
+    raise ValueError(f"{name} must be yes or no, not {value!r}")
 
 
 def _utc_now():

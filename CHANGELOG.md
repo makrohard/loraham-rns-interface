@@ -1,3 +1,12 @@
+# 0.3.0
+- `rnode_framing = yes|no` (default `no`): the RNode firmware's one-byte air
+  header on every frame, packets up to 508 bytes split over two frames and
+  reassembled by sequence on receive, so a box can exchange packets with an
+  RNode. `HW_MTU` follows (508 framed, 255 bare); while framing is on the
+  preamble defaults to what the firmware programs for the same SF/BW/CR (18 at
+  SF8/BW125) — an SX127x receiver needs at least that to hear an RNode at all.
+  The RF log keeps showing the air bytes, one line per air frame.
+
 # 0.2.1
 - RF log: one lock around rollover and write — the RX and TX threads could race two
   rollovers and lose the previous segment.

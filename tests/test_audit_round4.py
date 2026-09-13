@@ -167,7 +167,7 @@ def test_the_outbound_queue_is_bounded():
     iface = LoRaSPIInterface.__new__(LoRaSPIInterface)
     iface._tx_queue, iface._tx_dropped = deque(), 0
     iface._tx_event = type("E", (), {"set": lambda self: None})()
-    iface.online = True
+    iface.online, iface.max_packet = True, 255
 
     limit = LoRaSPIInterface.MAX_QUEUE_PACKETS
     for _ in range(limit + 10):

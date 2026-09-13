@@ -135,6 +135,7 @@ def _bare_interface(tmp_path, radio):
     iface._tx_active = threading.Event()
     iface._radio_lock = threading.RLock()
     iface._run = True
+    iface.rnode_framing, iface._reassembler = False, None
     iface.rflog = RfLog()
     iface.rflog.open(str(tmp_path / "rf-reticulum.log"))
     return iface

@@ -1,7 +1,9 @@
 """LoRaSPIInterface — an RNS interface that drives an SX127x/SX1262 directly.
 
 No rnoded, no RNode firmware, no KISS: one LoRa packet is one RNS packet, so the
-radio's own PHY framing does the job KISS does over a serial link.
+radio's own PHY framing does the job KISS does over a serial link. With
+``rnode_framing = yes`` the packet additionally carries the RNode firmware's
+one-byte air header (see ``framing.py``) so an RNode peer can talk to us.
 """
 
 import os
@@ -12,6 +14,7 @@ from collections import deque
 import RNS
 
 from .duty import DutyAccount, DutyError
+from .framing import FRAMED_MTU, Reassembler, frame, rnode_preamble
 from .profiles import resolve
 from .radio import MAX_PAYLOAD, RadioError
 from .rflog import RfLog, parse_switch
@@ -139,12 +142,26 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
                     + (f" ({self.frequency/1e6:.3f} MHz duty ceiling)"
                        if name == "airtime_limit_long" and ceiling else ""))
         self.syncword = int(str(c.get("syncword", "0x12")), 0)
-        self.preamble = int(c.get("preamble", 8))
 
+        # RNode air framing: one header byte per LoRa frame and packets up to the
+        # firmware's 508-byte MTU split over two frames. Off, a LoRa payload IS the
+        # RNS packet. Decided here, once; the loops never look at the config.
+        self.rnode_framing = parse_switch(c.get("rnode_framing", "no"), "rnode_framing")
+        # The RNode firmware derives its preamble from the radio settings (18
+        # symbols at SF8/BW125, 24 at SF7/BW125, 94 at SF7/BW500), and an SX127x
+        # receiver only locks when its own preamble setting is at least that long
+        # (measured: 8 heard nothing from an RNode, 18 heard every frame at
+        # SF8/BW125; the SX126x side does not care). So framing implies the
+        # firmware's value for these settings unless the operator sets one.
+        self.preamble = int(c.get("preamble", rnode_preamble(self.sf, self.bandwidth, self.cr)
+                                  if self.rnode_framing else 8))
+        self.max_packet = FRAMED_MTU if self.rnode_framing else MAX_PAYLOAD
         # RNS adds the IFAC bytes in Transport.transmit(), AFTER the packet is packed
         # (Transport.py: `raw = ... + ifac`). Advertising the full 255 therefore had a
         # legal 255-byte packet leave as 263 and get dropped here. Reserve the room.
-        self.HW_MTU = MAX_PAYLOAD - (self.DEFAULT_IFAC_SIZE if netname else 0)
+        # Inbound, Transport refuses raw > HW_MTU + ifac, so with framing on this must
+        # admit what an RNode sends (its interface declares 508).
+        self.HW_MTU = self.max_packet - (self.DEFAULT_IFAC_SIZE if netname else 0)
         self.IN, self.OUT, self.online = True, False, False
         self.bitrate = 0
         self.last_rssi = self.last_snr = None
@@ -184,6 +201,11 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
         self.radio.start_rx()
 
         self.bitrate = self.radio.bitrate(self.sf, self.bandwidth, self.cr)
+        # A pending first fragment older than four full frames on this channel is
+        # stale: the firmware sends the second fragment back to back.
+        self._reassembler = Reassembler(max_age=max(
+            5.0, 4 * self.radio.time_on_air(MAX_PAYLOAD, self.sf, self.bandwidth,
+                                            self.cr, self.preamble))) if self.rnode_framing else None
         self.online = True
 
         self._rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
@@ -208,16 +230,16 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
     def process_outgoing(self, data):
         if not self.online:
             return
-        if len(data) > MAX_PAYLOAD:
+        if len(data) > self.max_packet:
             # RNS packs NON-LINK packets against its global 500-byte MTU and appends
             # the IFAC afterwards, so an oversized announce or direct packet can still
-            # arrive here. A LoRa payload physically cannot exceed MAX_PAYLOAD and this
-            # driver does not fragment, so the packet is dropped — but never silently:
-            # the count makes a systematic problem visible instead of "the link is
-            # flaky". Fragmentation is the real fix and is not in this release.
+            # arrive here. A LoRa payload physically cannot exceed MAX_PAYLOAD and
+            # without RNode framing this driver does not fragment, so the packet is
+            # dropped — but never silently: the count makes a systematic problem
+            # visible instead of "the link is flaky".
             self._tx_oversize += 1
-            RNS.log(f"{self} dropping {len(data)} bytes, over the {MAX_PAYLOAD} byte "
-                    f"LoRa limit ({self._tx_oversize} oversize drops so far; "
+            RNS.log(f"{self} dropping {len(data)} bytes, over the {self.max_packet} byte "
+                    f"limit ({self._tx_oversize} oversize drops so far; "
                     f"link MTU is {self.HW_MTU})", RNS.LOG_ERROR)
             return
         if len(self._tx_queue) >= self.MAX_QUEUE_PACKETS:
@@ -283,6 +305,10 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
                             f"SNR {snr:.2f} dB", RNS.LOG_DEBUG)
                     # What the radio received — before RNS decides what it is.
                     self.rflog.rx(rssi, snr, data)
+                    if self._reassembler is not None:
+                        data = self._reassembler.feed(data)
+                        if data is None:
+                            continue          # a fragment, or a header with nothing behind it
                     self.process_incoming(data)
             except (SpiBusError, RadioError) as exc:
                 self._fail(exc)
@@ -309,8 +335,11 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
                     RNS.log(f"{self} TX error: {exc}", RNS.LOG_ERROR)
 
     def _transmit(self, data, queued_at):
-        toa = self.radio.time_on_air(len(data), self.sf, self.bandwidth,
-                                     self.cr, self.preamble)
+        # One RNS packet is one LoRa frame — or, with RNode framing, one or two
+        # frames that each carry the header byte. Airtime is charged per frame.
+        frames = frame(data) if self.rnode_framing else [data]
+        toa = sum(self.radio.time_on_air(len(f), self.sf, self.bandwidth,
+                                         self.cr, self.preamble) for f in frames)
         # Reserved BEFORE keying up and persisted, so a crash or restart cannot
         # wipe the hour's accounting.
         while True:
@@ -325,14 +354,18 @@ class LoRaSPIInterface(RNS.Interfaces.Interface.Interface):
         with self._radio_lock:
             self._tx_active.set()
         try:
-            if self.radio.transmit(data, max(5.0, toa * 4)):
-                self.rflog.tx("ok", data)
-            else:
-                # Counted as transmitted: we cannot prove nothing was radiated,
-                # so the log says so too rather than staying silent.
-                RNS.log(f"{self} TX did not confirm within the window "
-                        f"(airtime still charged)", RNS.LOG_ERROR)
-                self.rflog.tx("unconfirmed", data)
+            for f in frames:
+                # Every frame goes out even if an earlier one did not confirm: it
+                # may well have been radiated, and the peer completes a split packet
+                # only from both halves.
+                if self.radio.transmit(f, max(5.0, toa * 4)):
+                    self.rflog.tx("ok", f)
+                else:
+                    # Counted as transmitted: we cannot prove nothing was radiated,
+                    # so the log says so too rather than staying silent.
+                    RNS.log(f"{self} TX did not confirm within the window "
+                            f"(airtime still charged)", RNS.LOG_ERROR)
+                    self.rflog.tx("unconfirmed", f)
             self.txb += len(data)
             with self._radio_lock:
                 self.radio.start_rx()

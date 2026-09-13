@@ -70,6 +70,45 @@ loop cannot wipe the hour's accounting. Corrupt state blocks TX but never RX; an
 unconfirmed transmission stays charged, because we cannot prove nothing was
 radiated.
 
+## RNode air framing
+
+By default one LoRa payload *is* one Reticulum packet, which is what two LoRaHAM
+boxes expect of each other. The official RNode firmware does not: it puts one
+header byte in front of every LoRa packet (a random 4-bit sequence plus a split
+flag) and strips it on receive, and it sends packets over 254 bytes as two
+frames that carry the same header. Bare packets and framed packets cannot be
+told apart on the air, so an RNode and a bare box never exchange a packet even
+with identical radio settings — the box sees the header as part of the packet,
+the RNode eats the box's first byte as a header.
+
+```
+  [[LoRa]]
+    rnode_framing = yes
+```
+
+turns the driver into what the firmware expects: the header goes on every
+outgoing frame, packets up to the firmware's 508-byte MTU are split as it
+splits them, and on receive the header is stripped and split packets are
+reassembled by sequence before Reticulum sees them. Default `no`; a value that
+is neither refuses the interface. Set it the same on every station that shares
+the channel: a framed box and a bare box are as deaf to each other as an RNode
+and a bare box.
+
+`rnode_framing = yes` also sets the preamble, unless `preamble` is given, to
+what the RNode firmware programs for the same SF/BW/CR: symbols for a 24 ms
+target (6 ms above 30 kbps), never fewer than 18 — 18 at SF8/BW125, 24 at
+SF7/BW125, 94 at SF7/BW500. An SX127x receiver only locks when its own
+preamble setting is at least as long as the transmitter's (measured on the 433
+and 868 modules at SF8/BW125: programmed with 8 the box heard nothing from an
+RNode; with 18, every frame). The SX126x side does not care.
+
+Two deliberate departures from the firmware, both on the side of discarding: a
+pending first fragment older than four full frames' airtime (never under 5 s)
+is dropped rather than glued onto a later fragment that happens to reuse its
+sequence; and the header-only trailer the firmware sends after an exact
+508-byte packet is never delivered and also discards a pending half — the
+firmware would complete a half whose partner was lost with zero bytes.
+
 ## RF log
 
 Two keys in the interface section, both written by the controller:
@@ -93,7 +132,11 @@ The payload is the raw LoRa payload: Reticulum ciphertext, IFAC included, and
 MeshChat traffic looks like every other packet. `unconfirmed` means the radio
 did not report TX done within the window; the airtime was charged and the
 packet may have gone out, so it is never logged as not radiated. A packet
-dropped for duty or size writes nothing. The file is copy-truncated at 5 MB
+dropped for duty or size writes nothing. With `rnode_framing = yes` every
+logged frame starts with the RNode header byte and a split packet is two
+lines, because the log shows one line per air frame: a split packet is two lines, and a
+received exact-508-byte packet from an RNode is three, including the firmware's
+header-only trailer. The file is copy-truncated at 5 MB
 into `<path>.1` on the same inode, so truncating it externally is safe. `rf_log
 = yes` without a path, or a relative path, refuses the interface — the runner
 exits rather than running unlogged. Default `no`.
