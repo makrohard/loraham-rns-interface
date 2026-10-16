@@ -27,6 +27,11 @@ LOCK_FILE = "spi0.lock"
 # `dtoverlay=spi0-0cs` leaves the controller with an EMPTY cs-gpios property —
 # that is the property we verify. Peer processes (the opposite-band daemon) may
 # legitimately hold GPIO7/GPIO8 as their own soft chip-selects.
+# With `dtparam=spi=on` alone the controller owns CE0 = GPIO 8 and CE1 = GPIO 7
+# (cs-gpios lists exactly those two). Then a radio on GPIO 8 uses spidev0.0 and
+# one on GPIO 7 spidev0.1, and the kernel asserts CS for each transfer.
+CS_GPIOS = "/sys/class/spidev/spidev{bus}.0/device/../of_node/cs-gpios"
+KERNEL_CS = (8, 7)                    # (CE0, CE1) as the supported boot config has them
 
 
 class SpiBusError(RuntimeError):
@@ -40,11 +45,28 @@ class SpiBus:
         self._lock_fd = self._open_lock(runtime_dir)
 
         bus, dev = self._parse(self.path)
+        pins = self._controller_cs_pins(bus)
+        if pins:
+            # Kernel chip selects: the line is the controller's, not ours.
+            if tuple(pins) != KERNEL_CS:
+                raise SpiBusError(
+                    f"unsupported SPI chip-select configuration (cs-gpios {pins}); boot "
+                    "with dtparam=spi=on alone or with dtoverlay=spi0-0cs")
+            if self.cs_pin not in KERNEL_CS:
+                raise SpiBusError(
+                    f"the kernel owns the chip selects (GPIO 8 and 7) and this board's "
+                    f"CS is GPIO {self.cs_pin}: boot with dtoverlay=spi0-0cs")
+            dev = KERNEL_CS.index(self.cs_pin)
+            self.path = f"/dev/spidev{bus}.{dev}"
         self._bus, self._dev = bus, dev
         self.spi = spidev.SpiDev()
         self.spi.open(bus, dev)
         self.spi.max_speed_hz = self.speed_hz
         self.spi.mode = 0
+        if pins:
+            self._cs = None
+            self.no_cs_mode = "kernel-cs"
+            return
 
         # We drive NSS ourselves (soft CS), active low. Requesting the line via
         # libgpiod also re-muxes it away from the SPI controller's alt function,
@@ -57,6 +79,19 @@ class SpiBus:
         self._enforce_no_kernel_cs()
 
     # -- setup --------------------------------------------------------------
+
+    @staticmethod
+    def _controller_cs_pins(bus):
+        """The GPIO pins in the controller's `cs-gpios` (big-endian u32 triplets:
+        phandle, pin, flags); [] when it has none (spi0-0cs). Unreadable also gives
+        []: the soft-CS path then decides exactly as before (`_enforce_no_kernel_cs`
+        refuses an unproven bus, and a CS line the kernel owns cannot be claimed)."""
+        try:
+            with open(CS_GPIOS.format(bus=bus), "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return []
+        return [int.from_bytes(raw[i + 4:i + 8], "big") for i in range(0, len(raw) - 11, 12)]
 
     @staticmethod
     def _parse(path):
@@ -184,6 +219,11 @@ class SpiBus:
         """
         self._acquire()
         try:
+            if self._cs is None:              # kernel chip select: one message, CS by the kernel
+                try:
+                    return self.spi.xfer2(list(payload))
+                except Exception as exc:
+                    raise SpiBusError(f"SPI transfer failed: {exc}") from None
             try:
                 self._cs.set_value(self.cs_pin, Value.ACTIVE)   # active_low -> NSS low
             except Exception as exc:
@@ -207,7 +247,7 @@ class SpiBus:
 
     def close(self):
         for shut in (lambda: self.spi.close(),
-                     lambda: self._cs.release(),
+                     lambda: self._cs and self._cs.release(),
                      lambda: os.close(self._lock_fd)):
             try:
                 shut()

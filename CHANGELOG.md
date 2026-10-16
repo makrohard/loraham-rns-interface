@@ -1,3 +1,7 @@
+# Unreleased
+- Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on
+  GPIO 8 or 7 uses `/dev/spidev0.0` or `/dev/spidev0.1` and claims no CS line; any other CS is refused.
+
 # 0.3.0
 - `rnode_framing = yes|no` (default `no`): the RNode firmware's one-byte air
   header on every frame, packets up to 508 bytes split over two frames and

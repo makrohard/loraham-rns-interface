@@ -36,10 +36,15 @@ rules, so the daemon's invariant still holds while Reticulum runs. One
 transaction is `acquire lock → assert CS → transfer → deassert CS → release`,
 and the lock is never held across a wait loop.
 
-Chip-select is driven by us (soft CS), which is the mode lhpc's
-`bootstrap-deps.sh --spi-mode soft-cs` configures. Claiming the line through
+With soft chip selects (`dtoverlay=spi0-0cs`, lhpc's `bootstrap-deps.sh
+--spi-mode soft-cs`) chip-select is driven by us. Claiming the line through
 libgpiod also re-muxes it away from the SPI controller, which is what guarantees
 the kernel cannot assert it in parallel.
+
+With kernel chip selects (`dtparam=spi=on` alone: the controller's `cs-gpios`
+lists GPIO 8 then 7) a radio on GPIO 8 uses `/dev/spidev0.0` and one on GPIO 7
+`/dev/spidev0.1`; the kernel asserts CS for each transfer and we claim no line.
+A board with any other CS line, or any other chip-select layout, is refused.
 
 ## Hardware
 
