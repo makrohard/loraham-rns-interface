@@ -53,3 +53,25 @@ def test_ledger_is_json_and_owner_only(tmp_path):
     data = json.loads((tmp_path / "airtime.json").read_text())
     assert data["version"] == 1 and len(data["entries"]) == 1
     assert (tmp_path / "airtime.json").stat().st_mode & 0o077 == 0
+
+
+def test_a_reader_that_wins_the_lock_race_waits_for_the_initial_ledger(tmp_path):
+    """The creator makes the lock file (O_EXCL) and only then takes the flock. A second
+    account can find the file, win the flock in that gap, see no ledger yet and hit the
+    by-design 'has disappeared' refusal — an exception escaping a worker thread. The
+    creator's window is simulated by delaying its flock; the second caller must wait
+    for the initialisation write instead of refusing."""
+    import time
+    from loraham_rns.duty import DutyAccount
+    creator = acct(tmp_path, short_limit=100.0)
+    slow_flock = creator._flock
+    creator._flock = lambda fd: (time.sleep(0.4), slow_flock(fd))[1]
+    results = {}
+    def create():
+        results["creator"] = creator.reserve(0.01)
+    t = threading.Thread(target=create)
+    t.start()
+    time.sleep(0.1)                                   # lock file exists, ledger does not
+    results["late"] = acct(tmp_path, short_limit=100.0).reserve(0.01)   # raised DutyError before the fix
+    t.join()
+    assert results["creator"][0] and results["late"][0]

@@ -1,6 +1,10 @@
 # Unreleased
 - Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on
   GPIO 8 or 7 uses `/dev/spidev0.0` or `/dev/spidev0.1` and claims no CS line; any other CS is refused.
+- Duty ledger: a caller that found the lock file but no ledger could win the flock
+  in the creator's gap between creating the lock and locking it, and refused with
+  "has disappeared". It now waits (bounded by the lock timeout) for the creator's
+  initialisation write before locking; a ledger that never appears still refuses.
 
 # 0.3.0
 - `rnode_framing = yes|no` (default `no`): the RNode firmware's one-byte air
