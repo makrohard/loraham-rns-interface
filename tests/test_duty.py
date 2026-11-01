@@ -128,6 +128,55 @@ def test_a_caller_that_wins_the_lock_in_the_creators_gap_waits_for_the_ledger(tm
     assert results["late"] == (True, ""), results["late"]   # DutyError "has disappeared" before the fix
 
 
+@pytest.mark.parametrize("where", ["ledger_wait", "lock_wait"])
+def test_an_interrupt_while_waiting_closes_the_lock_fd(tmp_path, monkeypatch, where):
+    """reserve() opens the lock file, then may sleep twice before it holds the lock: while
+    the ledger is missing (the creator's gap) and while a peer holds the flock. An
+    exception raised in either sleep — KeyboardInterrupt, SystemExit — must not leak the
+    lock file's descriptor; a long-running node would run out of them."""
+    import fcntl
+    import os
+    import types
+
+    from loraham_rns import duty as duty_mod
+
+    path = tmp_path / "airtime.json"
+    a = acct(tmp_path, short_limit=100.0)
+    assert a.reserve(0.01)[0]                        # lock file + ledger exist
+    holder = None
+    if where == "ledger_wait":
+        path.unlink()                                # lock without ledger: the wait loop runs
+    else:
+        holder = os.open(f"{path}.lock", os.O_RDWR)  # a peer holds the flock: the lock loop runs
+        fcntl.flock(holder, fcntl.LOCK_EX)
+
+    def interrupted(_):
+        raise KeyboardInterrupt
+
+    shim = types.SimpleNamespace(**{k: getattr(time_mod, k) for k in dir(time_mod) if not k.startswith("__")})
+    shim.sleep = interrupted
+    monkeypatch.setattr(duty_mod, "time", shim)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            acct(tmp_path, short_limit=100.0).reserve(0.01)
+    finally:
+        monkeypatch.undo()
+        if holder is not None:
+            os.close(holder)
+    # Count descriptors that still point at the lock file. (A before/after diff of
+    # /proc/self/fd misses the leak: the leaked fd reuses the number listdir's own
+    # descriptor had in the "before" listing.)
+    lock = os.path.realpath(f"{path}.lock")
+    leaked = []
+    for name in os.listdir("/proc/self/fd"):
+        try:
+            if os.readlink(f"/proc/self/fd/{name}") == lock:
+                leaked.append(name)
+        except OSError:                              # listdir's own fd, already closed
+            pass
+    assert not leaked, f"lock fd leaked: {leaked}"
+
+
 class _FakeClock:
     """time for loraham_rns.duty with a virtual monotonic clock: sleep() advances it
     and records the total, so the wait's bound is measured without wall time."""

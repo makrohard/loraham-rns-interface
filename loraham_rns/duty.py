@@ -69,16 +69,18 @@ class DutyAccount:
                 first_use = True
             except FileExistsError:        # lost the race — the winner initialises
                 fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
-        if not first_use and create and not os.path.exists(self.path):
-            # The creator makes the lock file first and takes the flock second; in
-            # that gap a second caller can win the flock, find no ledger and refuse
-            # ("has disappeared"). Wait for the creator's initialisation write before
-            # locking. Bounded: a ledger that never appears is the wiped-ledger case
-            # and keeps its refusal — only after the same timeout as the lock itself.
-            deadline = time.monotonic() + LOCK_TIMEOUT_S
-            while not os.path.exists(self.path) and time.monotonic() < deadline:
-                time.sleep(0.02)
+        # Everything between opening the lock file and returning it locked sits in one
+        # try: any exception, an interrupt during a sleep included, closes the fd.
         try:
+            if not first_use and create and not os.path.exists(self.path):
+                # The creator makes the lock file first and takes the flock second; in
+                # that gap a second caller can win the flock, find no ledger and refuse
+                # ("has disappeared"). Wait for the creator's initialisation write before
+                # locking. Bounded: a ledger that never appears is the wiped-ledger case
+                # and keeps its refusal — only after the same timeout as the lock itself.
+                deadline = time.monotonic() + LOCK_TIMEOUT_S
+                while not os.path.exists(self.path) and time.monotonic() < deadline:
+                    time.sleep(0.02)
             self._flock(fd)
         except BaseException:
             os.close(fd)
