@@ -1,10 +1,13 @@
-# Unreleased
+# 0.3.1
 - Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on
   GPIO 8 or 7 uses `/dev/spidev0.0` or `/dev/spidev0.1` and claims no CS line; any other CS is refused.
-- Duty ledger: a caller that found the lock file but no ledger could win the flock
-  in the creator's gap between creating the lock and locking it, and refused with
-  "has disappeared". It now waits (bounded by the lock timeout) for the creator's
-  initialisation write before locking; a ledger that never appears still refuses.
+- Duty ledger: a caller that finds the lock but no ledger waits (≤ the lock timeout) for the
+  creator's first write instead of refusing with "has disappeared".
+- Duty ledger: an exception while waiting for the lock closes the lock file's descriptor.
+- Tests: the client tests use an instance name of their own; an `os.exec*` call in a test fails it.
+- Known limit: loraham-rns-client accepts any listener on the instance's address as the instance
+  (rns 1.5.7); `--host`/`--port` have no effect. See docs/audit/V040-CARRY.md.
+- Known limit: with a wiped duty ledger each TX attempt waits about 2 s before it refuses.
 
 # 0.3.0
 - `rnode_framing = yes|no` (default `no`): the RNode firmware's one-byte air
