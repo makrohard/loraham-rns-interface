@@ -30,16 +30,19 @@ DEFAULT_PORT = 37428          # the shared instance's RPC listener
 
 
 def instance_present(configdir, host=DEFAULT_HOST, port=DEFAULT_PORT, timeout=0.0):
-    """Prove a COMPATIBLE, AUTHENTICATED Reticulum shared instance is there.
+    """Ask RNS whether the shared instance of `configdir` is there.
 
-    An open TCP port is not proof: anything can listen on 37428, and when RNS cannot
-    authenticate against it, it falls back to becoming standalone — loading the LoRa
-    interface from the config we hand the client, which is exactly the takeover this
-    wrapper exists to prevent.
+    The check runs in a CHILD process (its own instance must not survive into the
+    exec'd client): it constructs Reticulum with `require_shared_instance=True`, which
+    raises when nothing listens on the instance's socket, and then reads
+    `is_connected_to_shared_instance`.
 
-    So we ask RNS itself, in a CHILD process (its own instance must not survive into
-    the exec'd client): construct Reticulum with `require_shared_instance=True`, which
-    fails unless it attached to a real instance and passed its RPC handshake.
+    KNOWN LIMITS (measured with rns 1.5.7):
+    * It proves a listener, not an authenticated instance: a plain socket bound to the
+      instance's own address (AF_UNIX `rns/<instance_name>`, or the TCP
+      `shared_instance_port`) is reported as connected.
+    * `host` and `port` are not used: the probe follows the config in `configdir`
+      alone, so `--host/--port` of loraham-rns-client have no effect.
     """
     probe = (
         "import sys, RNS\n"
@@ -69,8 +72,10 @@ def main(argv=None):
         description="Run an RNS client only if the shared instance already exists.")
     ap.add_argument("--configdir", required=True,
                     help="the RNS config dir the client will use (the OWNER's)")
-    ap.add_argument("--host", default=DEFAULT_HOST)
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    ap.add_argument("--host", default=DEFAULT_HOST,
+                    help="not used: the check follows --configdir (known limit)")
+    ap.add_argument("--port", type=int, default=DEFAULT_PORT,
+                    help="not used: the check follows --configdir (known limit)")
     ap.add_argument("--wait", type=float, default=0.0,
                     help="seconds to wait for the instance before giving up")
     ap.add_argument("command", nargs=argparse.REMAINDER,
@@ -83,7 +88,7 @@ def main(argv=None):
 
     if not instance_present(args.configdir, args.host, args.port, args.wait):
         sys.stderr.write(
-            f"loraham-rns-client: no authenticated Reticulum shared instance for "
+            f"loraham-rns-client: no Reticulum shared instance for "
             f"{args.configdir} — refusing to start {os.path.basename(cmd[0])}, "
             f"because it would become the shared-instance OWNER and take the radio.\n"
             f"Start the node first:  lhpc stack start reticulum\n")
