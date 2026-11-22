@@ -1,9 +1,18 @@
 # loraham-rns-interface
 
-A **direct-SPI LoRa interface for Reticulum** on LoRaHAM Pi hardware: RNS drives
-the radio itself over `spidev` + `libgpiod`. No rnoded, no RNode firmware, and no
-KISS layer — one LoRa packet is one RNS packet, so the radio's own PHY framing
-does the job KISS does over a serial link.
+**LoRa interfaces for Reticulum** on LoRaHAM Pi hardware. No rnoded, no RNode
+firmware, and no KISS layer — one LoRa packet is one RNS packet, so the radio's
+own PHY framing does the job KISS does over a serial link. Two backends, the same
+air format, duty accounting, power policy and RF log:
+
+- `LoRaDaemonInterface` reaches the radio through the LoRaHAM daemon's sockets,
+  so it shares a box with the daemon's other clients and runs on USB radios too.
+  Its section and its contract with the controller:
+  [docs/daemon-interface.md](docs/daemon-interface.md). A key it is not given takes
+  its default there; the direct-SPI interface requires `airtime_limit_short` and
+  `airtime_limit_long`.
+- `LoRaSPIInterface` drives the radio itself over `spidev` + `libgpiod`;
+  [Sharing the SPI bus](#sharing-the-spi-bus) and [Hardware](#hardware) are about it.
 
 Built for [loraham-pi-control](https://github.com/makrohard/loraham-pi-control),
 which ships it as the `reticulum` stack.

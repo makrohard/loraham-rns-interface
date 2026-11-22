@@ -239,7 +239,9 @@ def main(argv=None):
             if getattr(iface, "fatal", None) is not None:
                 RNS.log(f"radio fault: {iface.fatal}", RNS.LOG_CRITICAL)
                 return EXIT_RADIO_FATAL
-            if not getattr(iface, "online", False):
+            # The direct-SPI interface goes offline only with a fault; the daemon interface's
+            # offline is a hold (the daemon's radio not ready) that it recovers from itself.
+            if not getattr(iface, "online", False) and getattr(iface, "OFFLINE_IS_FATAL", True):
                 RNS.log("interface went offline", RNS.LOG_CRITICAL)
                 return EXIT_RADIO_FATAL
     except KeyboardInterrupt:
