@@ -47,6 +47,7 @@ without it). Numbers are decimal; switches are `yes`/`no` (also `on`/`off`, `tru
 | `crc` | switch | yes | `CRC` |
 | `ldro` | `auto`, `0`, `1` | `auto` | `LDRO` |
 | `txmode` | `managed` or `direct` | `managed` | `SET TXMODE` |
+| `txqueue` | switch (`1`/`0`, `yes`/`no`) | 1 | `SET TXQUEUE` |
 | `cadidle` | ms, 0–2000 | 50 | `SET CADIDLE` |
 | `cadwait` | ms, 50–5000 | 1500 | `SET CADWAIT` |
 | `cadrssi` | dBm, -130–0 | -90 | `SET CADRSSI` |
@@ -69,13 +70,15 @@ At every connect, and again whenever the radio returns to `READY`, the interface
 socket, each line answered `OK` before the next:
 
 1. `SET TXRESULT=1` — always; the interface needs a result per frame. Not a setting.
-2. `SET TXMODE=…`, `SET CADIDLE=…`, `SET CADWAIT=…`, `SET CADRSSI=…`, `SET CADMONITOR=…`,
-   `SET CADTXAFTERTIMEOUT=…` — one line each, from the section.
+2. `SET TXMODE=…`, `SET TXQUEUE=…`, `SET CADIDLE=…`, `SET CADWAIT=…`, `SET CADRSSI=…`,
+   `SET CADMONITOR=…`, `SET CADTXAFTERTIMEOUT=…` — one line each, from the section.
 3. `SET MODE=LORA FREQ=… BW=… SF=… CR=… POWER=… PREAMBLE=… SYNC=… CRC=… LDRO=…` — one line, from
    the section.
 
 Nothing else: without a controller the interface runs on the defaults above, never on the
-daemon's boot profile. A refused line (`ERR …`) leaves the interface offline, the reason logged.
+daemon's boot profile. A refused line (`ERR …`) leaves the interface offline, the reason logged,
+and it connects again: the daemon answers `SET TXQUEUE=0` with `ERR BUSY` while queued frames are
+pending, so it applies once they are done. No frame goes out before every line is answered `OK`.
 
 ## The pre-check
 

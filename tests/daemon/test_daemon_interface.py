@@ -65,6 +65,22 @@ def test_a_refused_setting_keeps_the_interface_offline_and_it_reconnects(daemon,
     assert "SET MODE=LORA" not in " ".join(daemon.lines), "nothing after the refused line"
 
 
+def test_txqueue_0_refused_busy_holds_the_interface_offline_until_the_daemon_takes_it(daemon, interface,
+                                                                                    monkeypatch):
+    """The daemon answers SET TXQUEUE=0 with ERR BUSY while its queue still holds frames: no frame goes
+    out meanwhile, the interface connects again and is online once the line is answered OK."""
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RECONNECT_S", 0.0)
+    daemon.refuse["SET TXQUEUE=0"] = "ERR BUSY"
+    iface = interface(txqueue="0")
+    iface.process_outgoing(b"held")
+    daemon.wait(lambda: daemon.connections >= 2, "a reconnect after ERR BUSY")
+    assert not iface.online and daemon.frames == []
+    assert "SET MODE=LORA" not in " ".join(daemon.lines), "nothing after the refused line"
+    del daemon.refuse["SET TXQUEUE=0"]                   # the daemon's queue is done
+    daemon.wait(lambda: iface.txb == 4, "the held packet sent once TXQUEUE=0 is taken")
+    assert daemon.frames == [b"held"]
+
+
 def test_a_packet_is_one_frame_and_its_airtime_is_charged(daemon, interface, tmp_path):
     iface = interface(rf_log="yes", rf_log_path=tmp_path / "rf.log")
     daemon.wait(lambda: iface.online, "online")

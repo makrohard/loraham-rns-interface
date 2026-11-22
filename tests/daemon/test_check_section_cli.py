@@ -61,7 +61,8 @@ def test_only_a_daemon_interface_section_passes(capsys):
     assert rc == 1 and out.partition(": ")[0] == "type"
 
 
-@pytest.mark.parametrize("extra", ["txpower = 15", "cadidle = 2001", "airtime_limit_long = 2", "rf_log = yes"])
+@pytest.mark.parametrize("extra", ["txpower = 15", "cadidle = 2001", "airtime_limit_long = 2", "rf_log = yes",
+                                   "txqueue = 2"])
 def test_the_cli_refuses_exactly_what_the_constructor_refuses(capsys, monkeypatch, extra):
     """The same section through the interface's constructor: refused before any socket, same key."""
     monkeypatch.setattr(RNS.Interfaces.Interface.Interface, "__init__", lambda self: None)

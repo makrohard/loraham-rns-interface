@@ -42,6 +42,7 @@ class Settings:
     crc: bool
     ldro: str
     txmode: str
+    txqueue: bool
     cadidle: int
     cadwait: int
     cadrssi: int
@@ -143,7 +144,7 @@ def check(c):
         txpower=_int(c, "txpower", cap, MIN_TXPOWER, cap),
         preamble=_int(c, "preamble", rnode_preamble(sf, bandwidth, cr) if rnode_framing else 8, 6, 512),
         syncword=_int(c, "syncword", 0x12, 0, 0xFF, base=0),
-        crc=_switch(c, "crc", True), ldro=ldro, txmode=txmode,
+        crc=_switch(c, "crc", True), ldro=ldro, txmode=txmode, txqueue=_switch(c, "txqueue", True),
         cadidle=_int(c, "cadidle", 50, 0, 2000), cadwait=_int(c, "cadwait", 1500, 50, 5000),
         cadrssi=_int(c, "cadrssi", -90, -130, 0), cadmonitor=_switch(c, "cadmonitor", False),
         cadtxaftertimeout=_switch(c, "cadtxaftertimeout", False), rnode_framing=rnode_framing,
@@ -157,6 +158,7 @@ def conf_lines(s):
     on = {False: "0", True: "1"}
     return ["SET TXRESULT=1",
             f"SET TXMODE={s.txmode}",
+            f"SET TXQUEUE={on[s.txqueue]}",
             f"SET CADIDLE={s.cadidle}",
             f"SET CADWAIT={s.cadwait}",
             f"SET CADRSSI={s.cadrssi}",

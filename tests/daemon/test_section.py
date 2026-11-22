@@ -16,8 +16,8 @@ def _section(**extra):
 def test_a_bare_section_takes_the_reticulum_defaults():
     s = check(_section())
     assert (s.bandwidth, s.sf, s.cr, s.preamble, s.syncword, s.crc, s.ldro) == (125000, 8, 5, 8, 0x12, True, "AUTO")
-    assert (s.txmode, s.cadidle, s.cadwait, s.cadrssi, s.cadmonitor, s.cadtxaftertimeout) == \
-        ("MANAGED", 50, 1500, -90, False, False)
+    assert (s.txmode, s.txqueue, s.cadidle, s.cadwait, s.cadrssi, s.cadmonitor, s.cadtxaftertimeout) == \
+        ("MANAGED", True, 50, 1500, -90, False, False)
     assert (s.airtime_short, s.airtime_long, s.rnode_framing, s.rf_log_path, s.ifac) == (33.0, 1.0, False, None, False)
 
 
@@ -56,6 +56,7 @@ def test_rnode_framing_implies_the_firmware_preamble_unless_set():
     ({"cadwait": "49"}, "cadwait"),
     ({"cadrssi": "1"}, "cadrssi"),
     ({"cadmonitor": "maybe"}, "cadmonitor"),
+    ({"txqueue": "2"}, "txqueue"),
     ({"rnode_framing": "maybe"}, "rnode_framing"),
     ({"airtime_limit_short": "0"}, "airtime_limit_short"),
     ({"airtime_limit_long": "1.5"}, "airtime_limit_long"),   # over 868.5's 1 % ceiling
@@ -75,8 +76,8 @@ def test_a_value_outside_its_range_is_refused_naming_the_key(extra, key):
 def test_the_section_becomes_these_conf_lines():
     s = check(_section(bandwidth=31250, spreadingfactor=9, codingrate=6, txpower=10, preamble=18,
                        syncword="0x2b", crc="no", ldro=1, txmode="direct", cadidle=0, cadwait=800,
-                       cadrssi=-100, cadmonitor="yes", cadtxaftertimeout="yes"))
+                       cadrssi=-100, cadmonitor="yes", cadtxaftertimeout="yes", txqueue="0"))
     assert conf_lines(s) == [
-        "SET TXRESULT=1", "SET TXMODE=DIRECT", "SET CADIDLE=0", "SET CADWAIT=800", "SET CADRSSI=-100",
+        "SET TXRESULT=1", "SET TXMODE=DIRECT", "SET TXQUEUE=0", "SET CADIDLE=0", "SET CADWAIT=800", "SET CADRSSI=-100",
         "SET CADMONITOR=1", "SET CADTXAFTERTIMEOUT=1",
         "SET MODE=LORA FREQ=868.500000 BW=31.25 SF=9 CR=6 POWER=10 PREAMBLE=18 SYNC=0x2B CRC=0 LDRO=1"]

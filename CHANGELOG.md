@@ -3,6 +3,8 @@
 - `LoRaDaemonInterface`: Reticulum through the LoRaHAM daemon (1.6.0 or later); its keys, defaults and
   the pre-check `loraham-rns-check-section`: docs/daemon-interface.md. The direct-SPI interface is unchanged.
 - loraham-rns-node: a daemon interface going offline (the radio not ready) is a hold, not an exit.
+- `LoRaDaemonInterface` key `txqueue` (default 1): sent as `SET TXQUEUE` with the other settings;
+  `0` is applied once the daemon's queue is empty (it answers `ERR BUSY` until then).
 - loraham-rns-client: the check asks the instance over its RPC, with the config dir's key; a plain
   listener on the instance's address or another directory's instance is refused.
 - Duty ledger: a wiped ledger (lock file older than the lock timeout) refuses at once, without the
