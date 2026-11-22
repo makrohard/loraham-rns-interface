@@ -7,6 +7,8 @@ checks a section first never sees the interface refuse it for its values.
 
 from dataclasses import dataclass
 
+from RNS.vendor.configobj import ConfigObj, ConfigObjError, DuplicateError
+
 from .framing import rnode_preamble
 from .interface import BAND_POLICY, duty_ceiling
 from .rflog import parse_switch
@@ -162,3 +164,56 @@ def conf_lines(s):
             f"SET CADTXAFTERTIMEOUT={on[s.cadtxaftertimeout]}",
             (f"SET MODE=LORA FREQ={s.frequency / 1e6:.6f} BW={BANDWIDTHS[s.bandwidth]} SF={s.sf} CR={s.cr} "
              f"POWER={s.txpower} PREAMBLE={s.preamble} SYNC=0x{s.syncword:02X} CRC={on[s.crc]} LDRO={s.ldro}")]
+
+
+def parse(text):
+    """One section as the node reads it: with RNS's own config reader (its vendored ConfigObj), so
+    the pre-check and the node never read a line differently. The `[[...]]` header is optional; a
+    second section, an unreadable line or a key given twice is a SectionError."""
+    lines = text.splitlines()
+    nested = any(line.strip().startswith("[[") for line in lines)
+    try:
+        # Where RNS keeps it; stop at the first error (several are otherwise one error without a line).
+        config = ConfigObj((["[interfaces]"] if nested else []) + lines, raise_errors=True)
+    except DuplicateError as exc:
+        raise SectionError(exc.line.partition("=")[0].strip(), "is given twice") from None
+    except ConfigObjError as exc:
+        raise SectionError(f"line {exc.line_number - nested}", "is not `key = value`") from None
+    parent = config["interfaces"] if nested else config
+    if parent.sections[nested:] or (nested and parent.scalars):
+        raise SectionError("section", "one section only")
+    return dict(parent[parent.sections[0]] if nested else parent)
+
+
+def main(argv=None, stdin=None):
+    """loraham-rns-check-section [FILE]: exit 0 when the daemon interface accepts the section (FILE,
+    stdin when absent), 1 with one line naming the key and its limit, 2 on a usage error or an
+    unreadable FILE."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="loraham-rns-check-section",
+                                     description="Check one LoRaDaemonInterface section.")
+    parser.add_argument("file", nargs="?", help="the section; stdin when absent")
+    path = parser.parse_args(argv).file
+    try:
+        if path is None:
+            text = (stdin or sys.stdin).read()
+        else:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+    except (OSError, UnicodeDecodeError) as exc:   # not a refusal: exit 1 is about the section's values
+        parser.error(f"cannot read the section: {exc}")
+    try:
+        section = parse(text)
+        if section.get("type") != "LoRaDaemonInterface":
+            raise SectionError("type", f"{section.get('type')!r} is not LoRaDaemonInterface")
+        check(section)
+    except SectionError as exc:
+        print(exc)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

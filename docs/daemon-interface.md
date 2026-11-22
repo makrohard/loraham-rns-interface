@@ -80,13 +80,15 @@ daemon's boot profile. A refused line (`ERR …`) leaves the interface offline, 
 ## The pre-check
 
 ```sh
+.venv/bin/loraham-rns-check-section FILE
 .venv/bin/loraham-rns-check-section < section
 ```
 
-reads one section's `key = value` lines (a `[[…]]` header, blank lines and `#` comments are
-skipped) and exits 0 when the interface would accept it, or 1 with one line naming the key and the
-limit it breaks. It runs the same code the interface's constructor runs, so a section that passes
-is not refused for its values. Exit 2 on a usage error.
+reads one section (from FILE, from stdin when FILE is absent) as the node does, with RNS's own
+config reader (the `[[…]]` header is optional, a key is given once) and exits 0 when the interface
+would accept it, or 1 with one line on stdout naming the key and the limit it breaks. It runs the same code the
+interface's constructor runs, so a section that passes is not refused for its values. Exit 2 on a
+usage error or a FILE that cannot be read (UTF-8).
 
 ## Health, the runner and detach
 

@@ -18,6 +18,7 @@ dev = ["pytest", "ruff"]
 [project.scripts]
 loraham-rns-node = "loraham_rns.node:main"
 loraham-rns-client = "loraham_rns.client:main"
+loraham-rns-check-section = "loraham_rns.section:main"
 
 [tool.setuptools]
 packages = ["loraham_rns"]
