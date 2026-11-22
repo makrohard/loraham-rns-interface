@@ -1,3 +1,8 @@
+# 0.4.0
+- Upgrade: rns 1.5.5 or later is required (was 1.4.0); upgrade RNS before this package.
+- loraham-rns-client: the check asks the instance over its RPC, with the config dir's key; a plain
+  listener on the instance's address or another directory's instance is refused.
+
 # 0.3.1
 - Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on
   GPIO 8 or 7 uses `/dev/spidev0.0` or `/dev/spidev0.1` and claims no CS line; any other CS is refused.

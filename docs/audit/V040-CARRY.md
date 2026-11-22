@@ -16,6 +16,8 @@ v0.4.0 (the daemon backend, which replaces the client/instance path below).
   backend owns the radio.
 - Open: rns 1.4.0 is the floor in pyproject.toml; its behaviour for the same probe is
   not measured. Measure it, or raise the floor to the version the check is proven on.
+- Done in 0.4.0: the probe calls `get_interface_stats()` over the RPC (key of the config dir),
+  under SIGALRM; the floor is rns 1.5.5, where the check is proven.
 
 ## 2. loraham-rns-client: `--host` / `--port` have no effect
 - The probe follows `--configdir` alone; both options are accepted and ignored
