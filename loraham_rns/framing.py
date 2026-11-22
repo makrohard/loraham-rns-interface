@@ -49,7 +49,7 @@ def rnode_preamble(sf, bw, cr):
     bitrate = sf * (4.0 / cr) / ((2 ** sf) / (bw / 1000.0)) * 1000.0
     target_ms = PREAMBLE_TARGET_MS - (PREAMBLE_FAST_DELTA_MS if bitrate > FAST_THRESHOLD_BPS else 0.0)
     symbols = target_ms / symbol_time_ms
-    return PREAMBLE_SYMBOLS_MIN if symbols < PREAMBLE_SYMBOLS_MIN else int(math.ceil(symbols))
+    return PREAMBLE_SYMBOLS_MIN if symbols < PREAMBLE_SYMBOLS_MIN else math.ceil(symbols)
 
 
 def frame(data, header=None):

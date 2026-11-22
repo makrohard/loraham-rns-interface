@@ -11,9 +11,44 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["rns>=1.4.0", "spidev", "gpiod>=2.1"]
 
+[project.optional-dependencies]
+# The test and lint tools; their versions float, the ruff rule set below is frozen.
+dev = ["pytest", "ruff"]
+
 [project.scripts]
 loraham-rns-node = "loraham_rns.node:main"
 loraham-rns-client = "loraham_rns.client:main"
 
 [tool.setuptools]
 packages = ["loraham_rns"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# The rule set is frozen explicitly (as in LoRaHAM Pi Control), so a ruff release that changes its
+# default selection cannot add rules behind our back; new rules inside a chosen family do arrive.
+select = [
+    "E4", "E7", "E9", "F", "W", "I", "UP", "B", "S", "SIM", "RUF", "PIE", "PERF", "FURB", "C4",
+    "ISC", "PYI", "EXE", "DTZ", "TRY", "BLE", "PLE", "PLW", "PLR0124",
+]
+ignore = [
+    "S101",    # `assert` for an internal invariant
+    "S603",    # subprocess calls take argv lists, no shell
+    "RUF001", "RUF002", "RUF003",  # intentional typographic non-ASCII in messages and comments
+    "TRY003",  # long messages in raise(...): no exception class per message
+    "TRY300",  # "move to else": the straight-line form reads better here
+    "TRY301",  # raise within try: deliberate in the validation paths
+    "SIM105",  # try/except/pass is clearer than contextlib.suppress here
+    "BLE001",  # blind except: a worker loop or a probe never propagates
+    "S110",    # try/except/pass: the same deliberate fallback
+    "S112",    # try/except/continue: the same
+    "ISC001",  # single-line implicit concatenation: wrapped messages
+    "PERF401", # manual list building in non-hot paths
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The direct-SPI driver stays byte-identical to v0.3.1 (the daemon backend is added beside it).
+"loraham_rns/spibus.py" = ["PLW0108"]
+"loraham_rns/sx126x.py" = ["RUF005"]
+"loraham_rns/sx127x.py" = ["RUF005"]

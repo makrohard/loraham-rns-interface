@@ -8,6 +8,17 @@ does the job KISS does over a serial link.
 Built for [loraham-pi-control](https://github.com/makrohard/loraham-pi-control),
 which ships it as the `reticulum` stack.
 
+## Contents
+
+- [Why a service runner](#why-a-service-runner)
+- [Sharing the SPI bus](#sharing-the-spi-bus)
+- [Hardware](#hardware)
+- [Duty cycle](#duty-cycle)
+- [RNode air framing](#rnode-air-framing)
+- [RF log](#rf-log)
+- [Development](#development)
+- [Licence](#licence)
+
 ## Why a service runner
 
 `rnsd` is not safe to supervise directly. RNS catches an external-interface
@@ -145,6 +156,11 @@ header-only trailer. The file is copy-truncated at 5 MB
 into `<path>.1` on the same inode, so truncating it externally is safe. `rf_log
 = yes` without a path, or a relative path, refuses the interface — the runner
 exits rather than running unlogged. Default `no`.
+
+## Development
+
+The tests, their layers and the checks a change passes before it lands:
+[tests/README.md](tests/README.md). CI runs the same checks on every push.
 
 ## Licence
 

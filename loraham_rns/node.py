@@ -45,7 +45,7 @@ def _clear_ready(path):
     except OSError as exc:
         # Readiness is gated solely on this path existing. A stale marker we
         # cannot remove would make a FAILED start look verified, so this is fatal.
-        raise SystemExit(f"could not clear the ready marker {path}: {exc}")
+        raise SystemExit(f"could not clear the ready marker {path}: {exc}") from exc
 
 
 def _own_listener(port):

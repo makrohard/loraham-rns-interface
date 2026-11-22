@@ -42,8 +42,8 @@ def _load_conf():
     if path and os.path.isfile(path):
         try:
             with open(path) as fh:
-                for line in fh:
-                    line = line.strip()
+                for raw in fh:
+                    line = raw.strip()
                     if not line or line.startswith("#") or "=" not in line:
                         continue
                     key, _, val = line.partition("=")
@@ -90,7 +90,7 @@ def _nmea_checksum_ok(line):
 
 
 class Fix:
-    __slots__ = ("lat", "lon", "alt", "speed", "bearing", "accuracy", "at")
+    __slots__ = ("accuracy", "alt", "at", "bearing", "lat", "lon", "speed")
 
     def __init__(self, lat, lon, alt=None, speed=None, bearing=None, accuracy=None):
         self.lat, self.lon, self.alt = lat, lon, alt
@@ -193,7 +193,7 @@ class NmeaSource(Source):
             attrs = termios.tcgetattr(fd)
         except termios.error:
             return                     # not a tty (FIFO/regular file) — nothing to set
-        iflag, oflag, cflag, lflag, ispeed, ospeed, cc = attrs
+        iflag, oflag, cflag, lflag, _ispeed, _ospeed, cc = attrs
         iflag &= ~(termios.IXON | termios.IXOFF | termios.IXANY | termios.INLCR
                    | termios.IGNCR | termios.ISTRIP | termios.BRKINT)
         oflag &= ~termios.OPOST
@@ -206,7 +206,7 @@ class NmeaSource(Source):
                           [iflag, oflag, cflag, lflag, speed, speed, cc])
 
     def read_once(self):
-        with open(self.conf["nmea_device"], "r", errors="replace") as dev:
+        with open(self.conf["nmea_device"], errors="replace") as dev:
             self._configure_port(dev.fileno(), self.conf["nmea_baud"])
             while self._run:
                 line = dev.readline()

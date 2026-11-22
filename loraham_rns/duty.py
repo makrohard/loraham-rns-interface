@@ -101,7 +101,7 @@ class DutyAccount:
                     # holding this lock for seconds is a fault, not congestion.
                     raise DutyError(
                         f"airtime lock {self.path}.lock busy for more than "
-                        f"{LOCK_TIMEOUT_S:.0f}s — refusing to transmit")
+                        f"{LOCK_TIMEOUT_S:.0f}s — refusing to transmit") from exc
                 time.sleep(0.02)
 
     def _read(self, fd, first_use=False):
@@ -137,7 +137,7 @@ class DutyAccount:
                 raise ValueError(f"unsupported ledger version {data!r:.40}")
             raw_entries = data["entries"]
             if not isinstance(raw_entries, list):
-                raise ValueError("entries is not a list")
+                raise ValueError("entries is not a list")  # noqa: TRY004 (read below as a corrupt ledger)
             if not raw_entries and not (first_use or data.get("initialised") is True):
                 # Apart from the initialisation write (which carries `initialised`),
                 # every write appends before persisting, so the writer never produces

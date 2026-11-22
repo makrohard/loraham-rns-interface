@@ -55,7 +55,7 @@ def instance_present(configdir, host=DEFAULT_HOST, port=DEFAULT_PORT, timeout=0.
     while True:
         try:
             done = subprocess.run([sys.executable, "-c", probe, configdir],
-                                  capture_output=True, timeout=30)
+                                  capture_output=True, timeout=30, check=False)
             if done.returncode == 0:
                 return True
         except (OSError, subprocess.SubprocessError):
@@ -94,7 +94,7 @@ def main(argv=None):
             f"Start the node first:  lhpc stack start reticulum\n")
         return 3
 
-    os.execvp(cmd[0], cmd)     # replaces this process; never returns on success
+    os.execvp(cmd[0], cmd)     # replaces this process; never returns on success  # noqa: S606 (the operator's argv)
 
 
 if __name__ == "__main__":

@@ -134,15 +134,14 @@ class RfLog:
     def _write(self, line):
         raw = line.encode("utf-8", "replace")
         try:
-            if os.fstat(self._fd).st_size + len(raw) > self.max_bytes:
-                # The previous segment is replaced only when the copy succeeded; a
-                # failed copy keeps the live file intact and lets it grow past the
-                # cap. Copied but not truncated: the next roll overwrites .1 again.
-                if self._copy_to_previous():
-                    try:
-                        os.ftruncate(self._fd, 0)
-                    except OSError:
-                        pass
+            # The previous segment is replaced only when the copy succeeded; a failed
+            # copy keeps the live file intact and lets it grow past the cap. Copied but
+            # not truncated: the next roll overwrites .1 again.
+            if os.fstat(self._fd).st_size + len(raw) > self.max_bytes and self._copy_to_previous():
+                try:
+                    os.ftruncate(self._fd, 0)
+                except OSError:
+                    pass
             while raw:
                 try:
                     n = os.write(self._fd, raw)

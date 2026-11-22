@@ -3,14 +3,15 @@ and the two hooks in the interface — RX before RNS sees the packet, TX with th
 radio's own confirmation as the outcome."""
 
 import os
+import re
 import threading
-from collections import deque
 
 import pytest
 import RNS
 
 from loraham_rns.interface import LoRaSPIInterface
 from loraham_rns.rflog import RfLog, format_rx, format_tx, parse_switch
+from spi_interface import FakeOwner, FakeRadio, bare_interface, spi_config
 
 # ---- lines ------------------------------------------------------------------
 
@@ -82,68 +83,9 @@ def test_rollover_copies_to_previous_and_keeps_the_inode(tmp_path):
 
 # ---- the hooks in the interface ------------------------------------------------
 
-class _Radio:
-    """Just enough radio for the two loops: one packet to hear, one to send."""
-
-    def __init__(self, heard, confirm):
-        self.heard, self.confirm = heard, confirm
-        self.sent = []
-
-    def wait_irq(self, timeout):
-        pass
-
-    def poll_rx(self):
-        got, self.heard = self.heard, None
-        return got
-
-    def time_on_air(self, n, sf, bw, cr, preamble):
-        return 0.1
-
-    def transmit(self, data, timeout):
-        self.sent.append(bytes(data))
-        return self.confirm
-
-    def start_rx(self):
-        pass
-
-
-class _Duty:
-    def reserve(self, toa):
-        return True, ""
-
-
-class _Owner:
-    def __init__(self):
-        self.inbound_packets = []
-
-    def inbound(self, data, iface):
-        self.inbound_packets.append(bytes(data))
-
-
-def _bare_interface(tmp_path, radio):
-    """The interface without its hardware: __init__ needs a bus and a radio, the
-    hooks under test do not."""
-    iface = LoRaSPIInterface.__new__(LoRaSPIInterface)
-    iface.name = "LoRa"
-    iface.owner = _Owner()
-    iface.radio, iface.duty = radio, _Duty()
-    iface.sf, iface.bandwidth, iface.cr, iface.preamble = 8, 125000, 5, 8
-    iface.rxb = iface.txb = 0
-    iface.last_rssi = iface.last_snr = None
-    iface._tx_queue = deque()
-    iface._tx_event = threading.Event()
-    iface._tx_active = threading.Event()
-    iface._radio_lock = threading.RLock()
-    iface._run = True
-    iface.rnode_framing, iface._reassembler = False, None
-    iface.rflog = RfLog()
-    iface.rflog.open(str(tmp_path / "rf-reticulum.log"))
-    return iface
-
-
 def test_rx_is_logged_before_rns_sees_the_packet(tmp_path):
-    radio = _Radio(heard=(b"\xaa\x42\x0a", -91.5, 2.75), confirm=True)
-    iface = _bare_interface(tmp_path, radio)
+    radio = FakeRadio(heard=(b"\xaa\x42\x0a", -91.5, 2.75), confirm=True)
+    iface = bare_interface(tmp_path, radio)
 
     def stop_after_first(data):
         iface._run = False
@@ -158,8 +100,8 @@ def test_rx_is_logged_before_rns_sees_the_packet(tmp_path):
 
 @pytest.mark.parametrize("confirm,outcome", [(True, "ok"), (False, "unconfirmed")])
 def test_tx_outcome_is_the_radios_confirmation(tmp_path, confirm, outcome):
-    radio = _Radio(heard=None, confirm=confirm)
-    iface = _bare_interface(tmp_path, radio)
+    radio = FakeRadio(heard=None, confirm=confirm)
+    iface = bare_interface(tmp_path, radio)
     iface._transmit(b"hi", queued_at=0)
     assert radio.sent == [b"hi"]
     line = (tmp_path / "rf-reticulum.log").read_text()
@@ -167,8 +109,8 @@ def test_tx_outcome_is_the_radios_confirmation(tmp_path, confirm, outcome):
 
 
 def test_a_duty_drop_is_not_a_transmission(tmp_path):
-    radio = _Radio(heard=None, confirm=True)
-    iface = _bare_interface(tmp_path, radio)
+    radio = FakeRadio(heard=None, confirm=True)
+    iface = bare_interface(tmp_path, radio)
     iface.MAX_DUTY_HOLD = -1                 # already over the hold: drop at once
 
     class _Refusing:
@@ -178,13 +120,6 @@ def test_a_duty_drop_is_not_a_transmission(tmp_path):
     iface._transmit(b"hi", queued_at=0)
     assert radio.sent == []
     assert (tmp_path / "rf-reticulum.log").read_text() == ""
-
-
-def _config(tmp_path, **extra):
-    c = {"name": "LoRa", "hardware": "loraham", "band": "868", "frequency": 868500000,
-         "airtime_limit_short": 5.0, "airtime_limit_long": 1.0, "state_dir": str(tmp_path)}
-    c.update(extra)
-    return c
 
 
 @pytest.mark.parametrize("extra,match", [
@@ -199,7 +134,7 @@ def test_a_bad_switch_refuses_the_interface_before_the_hardware(tmp_path, extra,
     Reticulum instance for its announce-rate defaults; that part is not under test."""
     monkeypatch.setattr(RNS.Interfaces.Interface.Interface, "__init__", lambda self: None)
     with pytest.raises(ValueError, match=match):
-        LoRaSPIInterface(_Owner(), _config(tmp_path, **extra))
+        LoRaSPIInterface(FakeOwner(), spi_config(tmp_path, **extra))
 
 
 def test_two_threads_never_lose_a_line_or_a_segment_across_rollovers(tmp_path):
@@ -227,4 +162,4 @@ def test_two_threads_never_lose_a_line_or_a_segment_across_rollovers(tmp_path):
     # No torn line: every line in both files is a complete record.
     for f in (prev, path):
         for line in f.read_bytes().splitlines():
-            assert line.startswith(b"20") and (b" RX " in line or b" TX " in line)
+            assert re.fullmatch(rb"20\S+ (RX|TX) .*", line), line

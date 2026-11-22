@@ -6,7 +6,9 @@ status, packet status, RX-buffer status and the payload — which would have mad
 the Waveshare probe fail in a way that looks like absent hardware.
 """
 
-from loraham_rns.sx126x import SX1262
+import pytest
+
+from loraham_rns.sx126x import CMD_WRITE_REGISTER, REG_LORA_SYNC_WORD_MSB, SX1262
 
 
 class FakeBus:
@@ -86,32 +88,15 @@ def test_busy_read_handles_the_libgpiod_value_enum():
     r._wait_busy(timeout_s=1.0)
 
 
-def test_configure_writes_the_radiolib_sync_word_encoding():
-    """configure() overwrote probe()'s known-good 0x14 0x24 with 0x11 0x24: the value
-    survived (high nibbles 1,2 = 0x12) but the MSB's low nibble was 1 instead of the
-    fixed 0x4 compatibility bits. Confirmed on hardware — the chip held 0x11 0x24."""
-    from loraham_rns.sx126x import REG_LORA_SYNC_WORD_MSB, SX1262
-
-    writes = []
-
-    r = SX1262.__new__(SX1262)
-    r.write_register = lambda reg, *vals: writes.append((reg, list(vals)))
-
-    # exercise only the sync-word line, with the same expression configure() uses
-    for sync, expect in ((0x12, [0x14, 0x24]), (0x34, [0x34, 0x44])):
-        writes.clear()
-        r.write_register(REG_LORA_SYNC_WORD_MSB,
-                         (sync & 0xF0) | 0x04, ((sync & 0x0F) << 4) | 0x04)
-        assert writes == [(REG_LORA_SYNC_WORD_MSB, expect)], f"{sync:#04x} -> {writes}"
-
-
-def test_configure_does_not_undo_the_probe_sync_word():
-    """probe() and configure() must agree: the source must not contain the old
-    `(syncword >> 4) | 0x10` form anywhere."""
-    import inspect
-
-    from loraham_rns import sx126x
-
-    src = inspect.getsource(sx126x)
-    assert "(syncword >> 4) | 0x10" not in src
-    assert "(syncword & 0xF0) | 0x04" in src
+@pytest.mark.parametrize("syncword,written", [(0x12, [0x14, 0x24]), (0x34, [0x34, 0x44])])
+def test_configure_writes_the_radiolib_sync_word_encoding(syncword, written):
+    """RadioLib's encoding: each nibble of the sync word in the HIGH nibble of its register,
+    both LOW nibbles the fixed 0x4. configure() once wrote 0x11 0x24 for 0x12, undoing the
+    0x14 0x24 its own probe() had just written (the chip held 0x11 0x24 on hardware).
+    Driven through configure() on the fake bus: the probe's write, then configure()'s."""
+    r = _radio([0x14, 0x24])
+    r._reset_req = None
+    r.profile = type("P", (), {"busy": -1, "tcxo_voltage": None, "dio2_rf_switch": False})()
+    r.configure(868_500_000, 125_000, 8, 5, 14, syncword=syncword)
+    sync_msb = [CMD_WRITE_REGISTER, REG_LORA_SYNC_WORD_MSB >> 8, REG_LORA_SYNC_WORD_MSB & 0xFF]
+    assert [f[3:] for f in r.bus.sent if f[:3] == sync_msb] == [[0x14, 0x24], written]

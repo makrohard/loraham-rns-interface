@@ -11,7 +11,7 @@ from loraham_rns.framing import (FLAG_SPLIT, FRAME_PAYLOAD, FRAMED_MTU, Reassemb
                                  frame, rnode_preamble)
 from loraham_rns.interface import LoRaSPIInterface
 from loraham_rns.radio import MAX_PAYLOAD
-from test_rflog import _Owner, _Radio, _bare_interface, _config
+from spi_interface import FakeOwner, FakeRadio, bare_interface, spi_config
 
 # ---- the header byte -----------------------------------------------------------
 
@@ -134,8 +134,8 @@ def test_a_header_with_nothing_behind_it_delivers_nothing():
 # ---- the interface, framing OFF: bytes on the air are the RNS packet ---------------
 
 def test_off_is_the_default_and_leaves_the_air_bytes_bare(tmp_path):
-    radio = _Radio(heard=(b"\xc0\x01\x00", -80.0, 1.0), confirm=True)
-    iface = _bare_interface(tmp_path, radio)
+    radio = FakeRadio(heard=(b"\xc0\x01\x00", -80.0, 1.0), confirm=True)
+    iface = bare_interface(tmp_path, radio)
     iface._transmit(b"\x71\x00\x05", queued_at=0)
     assert radio.sent == [b"\x71\x00\x05"]
 
@@ -150,13 +150,13 @@ def test_off_is_the_default_and_leaves_the_air_bytes_bare(tmp_path):
 # ---- the interface, framing ON ------------------------------------------------------
 
 def _framed_interface(tmp_path, radio):
-    iface = _bare_interface(tmp_path, radio)
+    iface = bare_interface(tmp_path, radio)
     iface.rnode_framing, iface._reassembler = True, Reassembler(max_age=5.0)
     return iface
 
 
 def test_tx_prepends_the_header_and_the_rf_log_shows_the_framed_bytes(tmp_path):
-    radio = _Radio(heard=None, confirm=True)
+    radio = FakeRadio(heard=None, confirm=True)
     iface = _framed_interface(tmp_path, radio)
     iface._transmit(b"\x71\x00\x05", queued_at=0)
     [sent] = radio.sent
@@ -167,7 +167,7 @@ def test_tx_prepends_the_header_and_the_rf_log_shows_the_framed_bytes(tmp_path):
 
 
 def test_tx_of_a_400_byte_packet_is_two_frames_each_charged_and_logged(tmp_path):
-    radio = _Radio(heard=None, confirm=True)
+    radio = FakeRadio(heard=None, confirm=True)
     iface = _framed_interface(tmp_path, radio)
     charged = []
     class _Duty:
@@ -185,7 +185,7 @@ def test_tx_of_a_400_byte_packet_is_two_frames_each_charged_and_logged(tmp_path)
 
 
 def test_an_unconfirmed_first_frame_does_not_stop_the_second(tmp_path):
-    radio = _Radio(heard=None, confirm=False)
+    radio = FakeRadio(heard=None, confirm=False)
     iface = _framed_interface(tmp_path, radio)
     iface._transmit(bytes(300), queued_at=0)
     assert len(radio.sent) == 2
@@ -197,7 +197,7 @@ def test_rx_strips_the_header_logs_the_framed_bytes_and_reassembles_before_rns(t
     first, second = frame(data, header=0xA0)
     heard = [(first, -70.0, 9.0), (second, -71.0, 8.5)]
 
-    class _TwoFrames(_Radio):
+    class _TwoFrames(FakeRadio):
         def poll_rx(self):
             return heard.pop(0) if heard else None
     radio = _TwoFrames(heard=None, confirm=True)
@@ -217,7 +217,7 @@ def test_rx_strips_the_header_logs_the_framed_bytes_and_reassembles_before_rns(t
 def test_rx_of_the_bench_announce_hands_rns_the_bare_packet(tmp_path):
     """The announce the box logged as c0 01 00 9c…: with framing on, RNS gets 01 00 9c…"""
     air = bytes.fromhex("c001009c9fb5d4dc")
-    radio = _Radio(heard=(air, -69.0, 12.0), confirm=True)
+    radio = FakeRadio(heard=(air, -69.0, 12.0), confirm=True)
     iface = _framed_interface(tmp_path, radio)
 
     def stop_after_first(data):
@@ -243,7 +243,7 @@ def test_the_switch_sets_the_mtu_before_the_hardware(tmp_path, value, want, monk
     extra = {} if value is None else {"rnode_framing": value}
     iface = LoRaSPIInterface.__new__(LoRaSPIInterface)
     with pytest.raises(_Stop):
-        iface.__init__(_Owner(), _config(tmp_path, **extra))
+        iface.__init__(FakeOwner(), spi_config(tmp_path, **extra))
     assert (iface.HW_MTU, iface.rnode_framing) == (FRAMED_MTU if want else MAX_PAYLOAD, want)
 
 
@@ -270,11 +270,11 @@ def test_framing_implies_the_rnode_preamble_unless_set(tmp_path, extra, want, mo
     monkeypatch.setattr("loraham_rns.interface.SpiBus", _no_bus)
     iface = LoRaSPIInterface.__new__(LoRaSPIInterface)
     with pytest.raises(_Stop):
-        iface.__init__(_Owner(), _config(tmp_path, **extra))
+        iface.__init__(FakeOwner(), spi_config(tmp_path, **extra))
     assert iface.preamble == want
 
 
 def test_a_bad_switch_refuses_the_interface(tmp_path, monkeypatch):
     monkeypatch.setattr(RNS.Interfaces.Interface.Interface, "__init__", lambda self: None)
     with pytest.raises(ValueError, match="rnode_framing must be yes or no"):
-        LoRaSPIInterface(_Owner(), _config(tmp_path, rnode_framing="maybe"))
+        LoRaSPIInterface(FakeOwner(), spi_config(tmp_path, rnode_framing="maybe"))
