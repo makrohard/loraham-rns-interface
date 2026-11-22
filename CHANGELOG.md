@@ -4,6 +4,8 @@
   listener on the instance's address or another directory's instance is refused.
 - Duty ledger: a wiped ledger (lock file older than the lock timeout) refuses at once, without the
   2 s wait for a creator; a younger lock file waits as before.
+- loraham-rns-client: `--port N` / `--host` (127.0.0.1 or localhost) now state where the TCP instance
+  must be; another address exits 3, another host is a usage error (2). Without them nothing changes.
 
 # 0.3.1
 - Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on

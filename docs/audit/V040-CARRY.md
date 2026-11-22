@@ -23,6 +23,9 @@ v0.4.0 (the daemon backend, which replaces the client/instance path below).
 - The probe follows `--configdir` alone; both options are accepted and ignored
   (documented in the 0.3.1 CHANGELOG and the option help). v0.4.0 removes them or
   makes the check use them.
+- Done in 0.4.0: they state where the configdir's instance must be (TCP on 127.0.0.1, port N), and the
+  check compares the address the probe's Reticulum used; they cannot redirect it, as the exec'd
+  client reads the same config dir.
 
 ## 3. Wiped duty ledger: each TX attempt waits about 2 s before it refuses
 - Since 0.3.1 a caller that finds the lock file but no ledger waits up to
