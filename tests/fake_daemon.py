@@ -150,11 +150,11 @@ class FakeDaemon:
                     self.seq += 1
                     out = []
                     if script == LATE:
-                        self._late = self.seq
+                        self._late = (conn, self.seq)
                     elif script != NO_RESULT:
-                        if self._late is not None:              # the earlier frame's result, late
-                            out.append(struct.pack("<BHBBH", 4, 4, OK, 0, self._late))
-                            self._late = None
+                        if self._late is not None and self._late[0] is conn:   # the earlier frame's, late
+                            out.append(struct.pack("<BHBBH", 4, 4, OK, 0, self._late[1]))
+                        self._late = None               # never to another connection (as the daemon)
                         out.append(struct.pack("<BHBBH", 4, 4, script, 0, self.seq))
                     self.cond.notify_all()
                 try:

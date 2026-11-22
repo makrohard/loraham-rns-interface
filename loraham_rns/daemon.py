@@ -334,6 +334,12 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
             except queue.Empty:
                 if self._expected is not None:        # its sequence is taken: a late result is old
                     self._expected = (self._expected + 1) & 0xFFFF
+                else:
+                    # No sequence is known on this connection yet, so a late result could not be
+                    # told from the next frame's. A new connection ends it: the daemon delivers a
+                    # result only to the connection that sent the frame.
+                    RNS.log(f"{self} no TX_RESULT before any sequence: reconnecting", RNS.LOG_WARNING)
+                    self._close_sockets()
                 return UNKNOWN
             if item == LOST:
                 return LOST

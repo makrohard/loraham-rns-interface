@@ -103,6 +103,7 @@ def test_a_second_half_refused_retries_the_whole_packet_charging_the_repeated_ha
 
 def test_a_lost_result_is_charged_never_repeated_and_ends_a_split(daemon, interface, tmp_path, monkeypatch):
     monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RESULT_MARGIN_S", 0.0)
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RECONNECT_S", 0.0)   # the first result: reconnect
     iface = interface(rnode_framing="yes", cadwait=50, rf_log="yes", rf_log_path=tmp_path / "rf.log")
     daemon.wait(lambda: iface.online, "online")
     daemon.results.append(NO_RESULT)
@@ -126,6 +127,24 @@ def test_a_late_result_is_matched_by_sequence_and_ignored(daemon, interface, mon
         iface.process_outgoing(packet)
     daemon.wait(lambda: iface.txb == 3 + 5, "the third packet")   # "two" stays unconfirmed
     assert daemon.frames == [b"one", b"two", b"three", b"three"]
+
+
+def test_a_late_result_of_the_first_frame_does_not_confirm_the_next(daemon, interface, tmp_path, monkeypatch):
+    """No sequence is known when the first frame's result is missing: its late OK must not be read as
+    the next frame's result, which is a refusal here, so the next packet goes again. The interface
+    reconnects; the first packet stays unconfirmed and charged."""
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RESULT_MARGIN_S", 0.0)
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RECONNECT_S", 0.0)
+    iface = interface(cadwait=50, rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([LATE, CHANNEL_BUSY])
+    iface.process_outgoing(b"one")
+    iface.process_outgoing(b"two")
+    daemon.wait(lambda: len(daemon.frames) == 3, "the refused packet sent again")
+    daemon.wait(lambda: iface.txb == 3, "the second packet confirmed")
+    assert daemon.frames == [b"one", b"two", b"two"]
+    assert [line.split(" outcome=")[1].split()[0] for line in _rf_log(tmp_path)] == ["unconfirmed", "ok"]
+    assert _charged(tmp_path) == pytest.approx(iface._toa(3) + iface._toa(3))
 
 
 def test_rx_goes_to_rns_after_the_rf_log(daemon, interface, tmp_path):
