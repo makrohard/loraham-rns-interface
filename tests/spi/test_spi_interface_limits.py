@@ -10,6 +10,7 @@ def test_the_outbound_queue_is_bounded():
     from loraham_rns.interface import LoRaSPIInterface
 
     iface = LoRaSPIInterface.__new__(LoRaSPIInterface)
+    iface.name = "LoRa"              # set by RNS's Interface.__init__ since rns 1.6 (a class default before)
     iface._tx_queue, iface._tx_dropped = deque(), 0
     iface._tx_event = type("E", (), {"set": lambda self: None})()
     iface.online, iface.max_packet = True, 255
