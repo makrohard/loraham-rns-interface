@@ -31,3 +31,5 @@ v0.4.0 (the daemon backend, which replaces the client/instance path below).
   ("has disappeared") and is dropped. The refusal is unchanged; the TX worker is
   slower to drain its queue. A change (for example telling "creator in its gap" from
   "wiped" by the lock file's age) is a behaviour change.
+- Done in 0.4.0: the wait runs only while the lock file is younger than LOCK_TIMEOUT_S;
+  older, the refusal comes at once.

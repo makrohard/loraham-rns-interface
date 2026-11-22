@@ -2,6 +2,8 @@
 - Upgrade: rns 1.5.5 or later is required (was 1.4.0); upgrade RNS before this package.
 - loraham-rns-client: the check asks the instance over its RPC, with the config dir's key; a plain
   listener on the instance's address or another directory's instance is refused.
+- Duty ledger: a wiped ledger (lock file older than the lock timeout) refuses at once, without the
+  2 s wait for a creator; a younger lock file waits as before.
 
 # 0.3.1
 - Kernel chip selects: when the SPI controller owns GPIO 8/7 (`dtparam=spi=on` alone), a radio on

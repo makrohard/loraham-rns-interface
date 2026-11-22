@@ -2,6 +2,7 @@
 pass the check — otherwise the 1 %/hour 868 limit is not actually enforced."""
 
 import json
+import os
 import threading
 import time as time_mod
 import types as types_mod
@@ -210,6 +211,22 @@ def test_a_wiped_ledger_still_refuses_after_one_lock_timeout(tmp_path, monkeypat
     with pytest.raises(DutyError, match="disappeared"):
         acct(tmp_path, short_limit=100.0).reserve(0.01)
     assert duty_mod.LOCK_TIMEOUT_S <= clock.slept < duty_mod.LOCK_TIMEOUT_S + 0.1
+
+
+def test_a_wiped_ledger_with_an_old_lock_refuses_at_once(tmp_path, monkeypatch):
+    """The lock file is older than the lock timeout: no creator is in its gap, so there is
+    nothing to wait for; the same refusal comes without the wait."""
+    from loraham_rns import duty as duty_mod
+
+    a = acct(tmp_path, short_limit=100.0)
+    assert a.reserve(0.01)[0]
+    (tmp_path / "airtime.json").unlink()
+    os.utime(tmp_path / "airtime.json.lock", (0, 0))
+    clock = _FakeClock()
+    monkeypatch.setattr(duty_mod, "time", clock.module())
+    with pytest.raises(DutyError, match="disappeared"):
+        acct(tmp_path, short_limit=100.0).reserve(0.01)
+    assert clock.slept == 0
 
 
 def test_a_status_read_never_waits_for_a_missing_ledger(tmp_path, monkeypatch):
