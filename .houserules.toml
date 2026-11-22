@@ -1,0 +1,24 @@
+# The house-rules profile of this repository, for LoRaHAM Pi Control's tools/check_houserules.py
+# (`check_houserules.py <base>..<head>`, run in this repository). The checker reads it at <base>, so a range
+# cannot relax its own rules. Attribution, markers, the wall clock and the HARD patterns are the checker's own
+# and apply as in every repository.
+
+# The test layers (tests/README.md): the direct-SPI driver, the modules both backends share, the daemon
+# backend, the service runner and client, the Sideband plugin.
+layers = [["tests/spi/", "spi"], ["tests/shared/", "shared"], ["tests/daemon/", "daemon"],
+          ["tests/node/", "node"], ["tests/plugin/", "plugin"]]
+test_files = ["test_*.py"]
+test_def = '(async )?def test_'
+
+# No module budgets: a small package, one module per concern.
+budget_file = ""
+family_dir = ""
+
+changelog = "CHANGELOG.md"
+
+# In added test lines: reading this repository's own source, a sleep, a prefix assert, a network call.
+[warn_patterns]
+source-read = '''(read_text|open)\(.*["'](loraham_rns|interfaces|plugins|scripts)/[^"']+\.py["']'''
+sleep = 'time\.sleep\('
+startswith = 'assert .*\.startswith\('
+network = '\b(requests\.|urllib\.request|socket\.create_connection)'
