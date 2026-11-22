@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "loraham-rns-interface"
-version = "0.3.1"
-description = "Direct-SPI LoRa interface for Reticulum on LoRaHAM Pi hardware"
+version = "0.4.0"
+description = "LoRa interfaces for Reticulum on LoRaHAM Pi hardware: through the LoRaHAM daemon or direct SPI"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

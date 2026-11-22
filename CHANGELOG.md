@@ -1,5 +1,8 @@
 # 0.4.0
 - Upgrade: rns 1.5.5 or later is required (was 1.4.0); upgrade RNS before this package.
+- `LoRaDaemonInterface`: Reticulum through the LoRaHAM daemon (1.6.0 or later); its keys, defaults and
+  the pre-check `loraham-rns-check-section`: docs/daemon-interface.md. The direct-SPI interface is unchanged.
+- loraham-rns-node: a daemon interface going offline (the radio not ready) is a hold, not an exit.
 - loraham-rns-client: the check asks the instance over its RPC, with the config dir's key; a plain
   listener on the instance's address or another directory's instance is refused.
 - Duty ledger: a wiped ledger (lock file older than the lock timeout) refuses at once, without the
