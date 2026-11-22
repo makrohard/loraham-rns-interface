@@ -11,6 +11,7 @@ from collections import deque
 
 SAFETY_S = 10.0
 TICK_S = 0.01
+FAKE = "fake daemon"                # the name of every thread of the fake
 OK, CHANNEL_BUSY, RADIO_NOT_READY = 0, 2, 3
 NO_RESULT, LATE = "none", "late"         # a frame without a result; one whose result comes later
 
@@ -26,6 +27,7 @@ class FakeDaemon:
         self.replied = []                  # the CONF lines it has sent its reply to
         self.results = deque()             # per frame: a status, NO_RESULT or LATE (default OK)
         self.connections = 0
+        self.closed = 0                    # client connections that ended (EOF from the client)
         self.seq, self._late = 100, None
         self.cond = threading.Condition()
         self._conns, self._run = [], True
@@ -35,7 +37,7 @@ class FakeDaemon:
             srv.bind(path)
             srv.listen(4)
             self._listeners.append(srv)
-            threading.Thread(target=self._accept, args=(srv, serve), daemon=True).start()
+            threading.Thread(target=self._accept, args=(srv, serve), name=FAKE, daemon=True).start()
 
     def section(self, **extra):
         c = {"name": "LoRa r1", "type": "LoRaDaemonInterface", "band": "868", "frequency": "868500000",
@@ -79,6 +81,11 @@ class FakeDaemon:
 
     # -- the server side ------------------------------------------------------
 
+    def _closed(self):
+        with self.cond:
+            self.closed += 1
+            self.cond.notify_all()
+
     def _accept(self, srv, serve):
         while self._run:
             try:
@@ -89,7 +96,7 @@ class FakeDaemon:
                 self._conns.append((conn, "conf" if serve == self._serve_conf else "data"))
                 self.connections += serve == self._serve_conf
                 self.cond.notify_all()
-            threading.Thread(target=serve, args=(conn,), daemon=True).start()
+            threading.Thread(target=serve, args=(conn,), name=FAKE, daemon=True).start()
 
     def _lines_of(self, conn):
         buf = b""
@@ -99,6 +106,7 @@ class FakeDaemon:
             except OSError:
                 return
             if not chunk:
+                self._closed()
                 return
             buf += chunk
             while b"\n" in buf:
@@ -128,6 +136,7 @@ class FakeDaemon:
             except OSError:
                 return
             if not chunk:
+                self._closed()
                 return
             buf += chunk
             while len(buf) >= 3:
