@@ -213,6 +213,23 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
         self.online = online
         (self._ready.set if online else self._ready.clear)()
 
+    def _end_connection(self, sent_on, why):
+        """The TX thread ends the connection `sent_on`: offline first, then a shutdown that wakes the IO thread,
+        which closes it (offline, LOST) and connects anew. Only the IO thread tears a connection down, so that
+        LOST always comes before the next connection's drain and offline before its online. A connection the
+        IO thread already replaced is left alone. Not ordered by a test (timing-bound): offline after the
+        shutdown would let the next send meet the dead socket (a not-ready refusal)."""
+        with self._lock:
+            if self._data is not sent_on:
+                return
+            self._set_online(False, why)
+            for sock in (self._conf, self._data):
+                if sock is not None:
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
     def _close_sockets(self):
         with self._lock:
             socks, self._conf, self._data = (self._conf, self._data), None, None
@@ -338,6 +355,7 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
         with self._lock:
             if self._data is None or not self.online:
                 return RADIO_NOT_READY, 0
+            sent_on = self._data                      # the connection whose result this waits for
             try:
                 self._data.sendall(struct.pack("<BH", TX_PACKET, len(f)) + f)
             except OSError:
@@ -354,7 +372,7 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                     # told from the next frame's. A new connection ends it: the daemon delivers a
                     # result only to the connection that sent the frame.
                     RNS.log(f"{self} no TX_RESULT before any sequence: reconnecting", RNS.LOG_WARNING)
-                    self._close_sockets()
+                    self._end_connection(sent_on, "reconnecting after a missing TX result")
                 return UNKNOWN, 0
             if item == LOST:
                 return LOST, 0

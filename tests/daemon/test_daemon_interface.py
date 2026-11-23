@@ -6,6 +6,7 @@ again as a new split and charged once; a lost result is charged and never repeat
 import json
 import re
 import struct
+import threading
 import types
 
 import pytest
@@ -246,6 +247,63 @@ def test_the_drop_after_the_hold_names_the_refusals(daemon, interface, monkeypat
     m = re.search(r"dropped 4 bytes: not sent within 120 s after (\d+) refused tries \(channel-busy (\d+), busy 0,"
                   r" not-ready 0; ", msg)
     assert m and m[1] == m[2] and int(m[1]) >= 2, msg
+
+
+def _reconnect_after_a_missing_first_result(daemon, iface, tmp_path):
+    """The scenario of the late-result test: "one" gets no result before any sequence is known (the TX thread
+    ends the connection), "two" is refused once on the new connection and sent again."""
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([LATE, CHANNEL_BUSY])
+    iface.process_outgoing(b"one")
+    iface.process_outgoing(b"two")
+    daemon.wait(lambda: iface.txb == 3, "the second packet confirmed")
+    assert daemon.frames == [b"one", b"two", b"two"]
+    assert _outcomes(tmp_path) == ["unconfirmed", "ok"]
+
+
+def _new_connection_online(daemon, iface):
+    return lambda: daemon.connections >= 2 and iface.online
+
+
+def test_a_reconnect_by_the_tx_thread_leaves_no_lost_result_on_the_new_connection(daemon, interface, tmp_path,
+                                                                                  monkeypatch, refusal_lines):
+    """The race forced: a LOST put by the TX thread (the one that met the missing result) is held until the new
+    connection is online, after its drain. It must not exist: only the IO thread ends a connection, before it
+    drains. Else "two" reads it as its own result, unconfirmed and never sent again."""
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RESULT_MARGIN_S", 0.0)
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RECONNECT_S", 0.0)
+    iface = interface(cadwait=50, rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    put = iface._results.put
+
+    def held_put(item, *a, **k):
+        if item == daemon_mod.LOST and threading.current_thread() is iface._threads[1]:   # the TX thread
+            daemon.wait(_new_connection_online(daemon, iface), "the new connection online")
+        put(item, *a, **k)
+    monkeypatch.setattr(iface._results, "put", held_put)
+    _reconnect_after_a_missing_first_result(daemon, iface, tmp_path)
+    [(_level, msg)] = refusal_lines()                  # "two": the busy try only, no false not-ready
+    assert "after 1 refused tries (channel-busy 1, busy 0, not-ready 0;" in msg, msg
+
+
+def test_a_reconnect_by_the_tx_thread_does_not_leave_the_new_connection_offline(daemon, interface, tmp_path,
+                                                                                monkeypatch):
+    """The race forced: the old teardown's offline step, "daemon connection closed" from the TX thread (key:
+    that thread AND that text), is held until the new connection is online. It must not exist there (the TX
+    thread's own step says why it reconnects and comes before its shutdown). Else the interface stays offline on
+    a live connection and "two" waits."""
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RESULT_MARGIN_S", 0.0)
+    monkeypatch.setattr(daemon_mod.LoRaDaemonInterface, "RECONNECT_S", 0.0)
+    iface = interface(cadwait=50, rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    set_online = iface._set_online
+
+    def held_set_online(online, why):
+        if (not online and why == "daemon connection closed"
+                and threading.current_thread() is iface._threads[1]):                     # the TX thread
+            daemon.wait(_new_connection_online(daemon, iface), "the new connection online")
+        set_online(online, why)
+    monkeypatch.setattr(iface, "_set_online", held_set_online)
+    _reconnect_after_a_missing_first_result(daemon, iface, tmp_path)
+    assert iface.online
 
 
 def test_rx_goes_to_rns_after_the_rf_log(daemon, interface, tmp_path):
