@@ -26,9 +26,20 @@ RX_PACKET, TX_PACKET, ERROR, TX_RESULT = 1, 2, 3, 4
 OK, BUSY, CHANNEL_BUSY, RADIO_NOT_READY, RADIO_ERROR = 0, 1, 2, 3, 4
 UNKNOWN, LOST = "unknown", "lost"           # no TX_RESULT: timed out / the socket went away
 NOT_SENT = (BUSY, CHANNEL_BUSY, RADIO_NOT_READY)  # nothing radiated: the packet is tried again
+REFUSED = {CHANNEL_BUSY: "channel-busy", BUSY: "busy", RADIO_NOT_READY: "not-ready"}   # the node line's names
+CAD_TIMEOUT_SEND = 0x04                      # TX_RESULT flag: MANAGED sent after its CAD wait timed out
 MAX_PAYLOAD = 255                            # one framed TX_PACKET (data-protocol.md, Size limits)
 NO_SIGNAL = -32768
 BROADCASTS = ("TX=", "CAD=", "RSSI=", "RADIO=")
+
+
+def _refusals(refused, queued_at):
+    """' after K refused tries (channel-busy A, busy B, not-ready C; S s)' for a packet's node line, or ''."""
+    k = sum(refused.values())
+    if not k:
+        return ""
+    counts = ", ".join(f"{name} {n}" for name, n in refused.items())
+    return f" after {k} refused tries ({counts}; {time.time() - queued_at:.1f} s)"
 
 
 class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
@@ -230,8 +241,7 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                 rssi, snr = struct.unpack_from("<hh", payload)
                 self._received(payload[4:], rssi, snr)
             elif kind == TX_RESULT and length == 4:
-                status, _flags, seq = struct.unpack("<BBH", payload)
-                self._results.put((status, seq))
+                self._results.put(struct.unpack("<BBH", payload))   # (status, flags, seq)
             elif kind == ERROR:
                 RNS.log(f"{self} daemon error frame: {payload.decode('utf-8', 'replace')}", RNS.LOG_ERROR)
 
@@ -274,10 +284,11 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
         """One packet: every try a new split (a new RNode sequence), one frame at a time. Its airtime
         is reserved once; frames refused before the air keep their share for the next try."""
         credit, radio_error, head = 0.0, False, None
+        refused = dict.fromkeys(REFUSED.values(), 0)     # frames the daemon refused before the air
         while self._run:
             if time.time() - queued_at > self.MAX_HOLD:
-                RNS.log(f"{self} dropped {len(data)} bytes: not sent within {self.MAX_HOLD:.0f} s",
-                        RNS.LOG_WARNING)
+                RNS.log(f"{self} dropped {len(data)} bytes: not sent within {self.MAX_HOLD:.0f} s"
+                        + _refusals(refused, queued_at), RNS.LOG_WARNING)
                 return
             if not self._ready.is_set():
                 self._ready.wait(1.0)
@@ -297,9 +308,9 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                     continue
             credit = 0.0
             for i, f in enumerate(frames):
-                status = self._send_frame(f, toas[i])
+                status, flags = self._send_frame(f, toas[i])
                 if status == OK:
-                    self.rflog.tx("ok", f)
+                    self.rflog.tx("ok-cad-timeout" if flags & CAD_TIMEOUT_SEND else "ok", f)
                     continue
                 if status in (UNKNOWN, LOST):
                     # Counted as transmitted, never repeated: it may have been radiated. A split
@@ -307,7 +318,8 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                     RNS.log(f"{self} TX result lost (airtime still charged)", RNS.LOG_ERROR)
                     self.rflog.tx("unconfirmed", f)
                     return
-                if status in NOT_SENT:
+                if status in NOT_SENT:                   # no RF-log line: nothing was radiated
+                    refused[REFUSED[status]] += 1
                     credit = sum(toas[i:])
                     break
                 if status == RADIO_ERROR and not radio_error:
@@ -317,16 +329,19 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                 return
             else:
                 self.txb += len(data)
+                if any(refused.values()):
+                    RNS.log(f"{self} sent {len(data)} bytes" + _refusals(refused, queued_at), RNS.LOG_NOTICE)
                 return
 
     def _send_frame(self, f, toa):
+        """(status, TX_RESULT flags) of one frame; 0 for flags without a result."""
         with self._lock:
             if self._data is None or not self.online:
-                return RADIO_NOT_READY
+                return RADIO_NOT_READY, 0
             try:
                 self._data.sendall(struct.pack("<BH", TX_PACKET, len(f)) + f)
             except OSError:
-                return RADIO_NOT_READY
+                return RADIO_NOT_READY, 0
         deadline = time.monotonic() + self.settings.cadwait / 1000 + toa + self.RESULT_MARGIN_S
         while True:
             try:
@@ -340,12 +355,12 @@ class LoRaDaemonInterface(RNS.Interfaces.Interface.Interface):
                     # result only to the connection that sent the frame.
                     RNS.log(f"{self} no TX_RESULT before any sequence: reconnecting", RNS.LOG_WARNING)
                     self._close_sockets()
-                return UNKNOWN
+                return UNKNOWN, 0
             if item == LOST:
-                return LOST
-            status, seq = item
+                return LOST, 0
+            status, flags, seq = item
             if self._expected is not None and (seq - self._expected) & 0xFFFF >= 0x8000:
                 RNS.log(f"{self} late TX_RESULT seq {seq} ignored (already charged)", RNS.LOG_NOTICE)
                 continue
             self._expected = (seq + 1) & 0xFFFF
-            return status
+            return status, flags

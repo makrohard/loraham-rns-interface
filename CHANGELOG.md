@@ -1,3 +1,7 @@
+# 0.4.1
+- `LoRaDaemonInterface` logs: a send after a timed-out CAD wait (TX_RESULT flag 0x04) is RF-log
+  `outcome=ok-cad-timeout`; a packet whose frames were refused (busy channel) gets one node-log line.
+
 # 0.4.0
 - Upgrade: rns 1.5.5 or later is required (was 1.4.0); upgrade RNS before this package.
 - `LoRaDaemonInterface`: Reticulum through the LoRaHAM daemon (1.6.0 or later); its keys, defaults and

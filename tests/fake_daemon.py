@@ -25,7 +25,7 @@ class FakeDaemon:
         self.refuse = {}                   # a CONF line -> the reply instead of OK
         self.lines, self.frames = [], []   # what it received
         self.replied = []                  # the CONF lines it has sent its reply to
-        self.results = deque()             # per frame: a status, NO_RESULT or LATE (default OK)
+        self.results = deque()             # per frame: a status, (status, flags), NO_RESULT or LATE (default OK)
         self.connections = 0
         self.closed = 0                    # client connections that ended (EOF from the client)
         self.seq, self._late = 100, None
@@ -147,6 +147,7 @@ class FakeDaemon:
                 with self.cond:
                     self.frames.append(payload)
                     script = self.results.popleft() if self.results else OK
+                    script, flags = script if isinstance(script, tuple) else (script, 0)
                     self.seq += 1
                     out = []
                     if script == LATE:
@@ -155,7 +156,7 @@ class FakeDaemon:
                         if self._late is not None and self._late[0] is conn:   # the earlier frame's, late
                             out.append(struct.pack("<BHBBH", 4, 4, OK, 0, self._late[1]))
                         self._late = None               # never to another connection (as the daemon)
-                        out.append(struct.pack("<BHBBH", 4, 4, script, 0, self.seq))
+                        out.append(struct.pack("<BHBBH", 4, 4, script, flags, self.seq))
                     self.cond.notify_all()
                 try:
                     conn.sendall(b"".join(out))

@@ -80,6 +80,16 @@ daemon's boot profile. A refused line (`ERR …`) leaves the interface offline, 
 and it connects again: the daemon answers `SET TXQUEUE=0` with `ERR BUSY` while queued frames are
 pending, so it applies once they are done. No frame goes out before every line is answered `OK`.
 
+## TX results and the logs
+
+- **RF log** (`rf_log = yes`): one TX line per frame the daemon radiated; its `outcome` is `ok`,
+  `ok-cad-timeout` (the daemon's TX_RESULT flag 0x04: MANAGED sent although its CAD wait timed out,
+  `CADTXAFTERTIMEOUT=1`; a likely collision) or `unconfirmed` (no result: counted as radiated). A frame
+  the daemon refused before the air (`CHANNEL_BUSY`, `BUSY`, `RADIO_NOT_READY`) writes no line.
+- **Node log**: a packet that met refusals gets one NOTICE line when it is sent, e.g. `… sent 120 bytes
+  after 3 refused tries (channel-busy 3, busy 0, not-ready 0; 4.6 s)`; dropped after the 120 s hold,
+  the WARNING drop line carries the same counts. `not-ready` includes a lost DATA socket.
+
 ## The pre-check
 
 ```sh

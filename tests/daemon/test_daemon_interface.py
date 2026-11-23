@@ -4,10 +4,12 @@ send the section and nothing else; one frame at a time; a frame refused before t
 again as a new split and charged once; a lost result is charged and never repeated."""
 
 import json
+import re
 import struct
 import types
 
 import pytest
+import RNS
 from fake_daemon import CHANNEL_BUSY, LATE, NO_RESULT, RADIO_NOT_READY
 
 from loraham_rns import daemon as daemon_mod
@@ -25,6 +27,19 @@ def _charged(tmp_path):
 
 def _rf_log(tmp_path):
     return (tmp_path / "rf.log").read_text().splitlines()
+
+
+def _outcomes(tmp_path):
+    return [line.split(" outcome=")[1].split()[0] for line in _rf_log(tmp_path)]
+
+
+@pytest.fixture
+def refusal_lines(monkeypatch):
+    """The node log's (RNS.log) per-packet lines: a sent packet's report and the drop line, with or without
+    refusal counts, so a report on a packet that met no refusal is seen too."""
+    seen = []
+    monkeypatch.setattr(RNS, "log", lambda msg, level=RNS.LOG_NOTICE, *a, **k: seen.append((level, str(msg))))
+    return lambda: [(level, msg) for level, msg in seen if re.search(r" sent \d+ bytes|refused tries", msg)]
 
 
 def test_connect_sends_the_section_and_nothing_else(daemon, interface):
@@ -161,6 +176,76 @@ def test_a_late_result_of_the_first_frame_does_not_confirm_the_next(daemon, inte
     assert daemon.frames == [b"one", b"two", b"two"]
     assert [line.split(" outcome=")[1].split()[0] for line in _rf_log(tmp_path)] == ["unconfirmed", "ok"]
     assert _charged(tmp_path) == pytest.approx(iface._toa(3) + iface._toa(3))
+
+
+def test_refused_frames_write_no_rf_line_and_one_node_line_when_the_packet_is_sent(daemon, interface, tmp_path,
+                                                                                  refusal_lines):
+    """The RF log has one TX line per frame radiated (its counters count them as aired); the node log names
+    the refusals once, when the packet ends, never once per try."""
+    iface = interface(rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([CHANNEL_BUSY, CHANNEL_BUSY])
+    iface.process_outgoing(b"hello")
+    daemon.wait(lambda: iface.txb == 5, "the packet sent")
+    assert daemon.frames == [b"hello"] * 3
+    assert _outcomes(tmp_path) == ["ok"]
+    [(level, msg)] = refusal_lines()
+    assert level == RNS.LOG_NOTICE
+    assert re.search(r" sent 5 bytes after 2 refused tries \(channel-busy 2, busy 0, not-ready 0; \d+\.\d s\)$", msg), msg
+
+
+def test_a_radio_not_ready_refusal_is_named_not_ready_not_a_busy_channel(daemon, interface, refusal_lines):
+    iface = interface()
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.append(RADIO_NOT_READY)
+    iface.process_outgoing(b"hello")
+    daemon.wait(lambda: iface.txb == 5, "the packet sent")
+    [(_level, msg)] = refusal_lines()
+    assert "after 1 refused tries (channel-busy 0, busy 0, not-ready 1;" in msg, msg
+
+
+def test_a_send_after_the_cad_timeout_is_logged_ok_cad_timeout(daemon, interface, tmp_path, refusal_lines):
+    """TX_RESULT flag 0x04: the daemon sent the frame although its CAD wait timed out (a likely collision)."""
+    iface = interface(rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([(0, 0x05), (0, 0x01)])
+    iface.process_outgoing(b"one")
+    iface.process_outgoing(b"two")
+    daemon.wait(lambda: iface.txb == 6, "both packets sent")
+    assert _outcomes(tmp_path) == ["ok-cad-timeout", "ok"]
+    assert refusal_lines() == []                          # nothing was refused: no per-packet node line
+
+
+def test_a_refused_second_half_has_no_rf_line_and_the_packet_one_node_line(daemon, interface, tmp_path,
+                                                                           refusal_lines):
+    iface = interface(rnode_framing="yes", rf_log="yes", rf_log_path=tmp_path / "rf.log")
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([0, CHANNEL_BUSY])
+    iface.process_outgoing(b"x" * 300)
+    daemon.wait(lambda: iface.txb == 300, "the packet sent")
+    assert len(daemon.frames) == 4                        # half 1, half 2 refused, the new split's two halves
+    assert _outcomes(tmp_path) == ["ok", "ok", "ok"]
+    [(_level, msg)] = refusal_lines()
+    assert "after 1 refused tries (channel-busy 1, busy 0, not-ready 0;" in msg, msg
+
+
+def test_the_drop_after_the_hold_names_the_refusals(daemon, interface, monkeypatch, refusal_lines):
+    clock = types.SimpleNamespace(now=1000.0)
+    shim = types.SimpleNamespace(**{k: getattr(daemon_mod.time, k) for k in ("monotonic", "sleep")})
+    shim.time = lambda: clock.now
+    monkeypatch.setattr(daemon_mod, "time", shim)
+    iface = interface()
+    daemon.wait(lambda: iface.online, "online")
+    daemon.results.extend([CHANNEL_BUSY] * 100000)        # refused until the hold is over
+    iface.process_outgoing(b"held")
+    daemon.wait(lambda: len(daemon.frames) >= 2, "two refused tries")
+    clock.now = 1000.0 + iface.MAX_HOLD + 1
+    daemon.wait(lambda: refusal_lines(), "the drop line")
+    [(level, msg)] = refusal_lines()
+    assert level == RNS.LOG_WARNING and iface.txb == 0
+    m = re.search(r"dropped 4 bytes: not sent within 120 s after (\d+) refused tries \(channel-busy (\d+), busy 0,"
+                  r" not-ready 0; ", msg)
+    assert m and m[1] == m[2] and int(m[1]) >= 2, msg
 
 
 def test_rx_goes_to_rns_after_the_rf_log(daemon, interface, tmp_path):
